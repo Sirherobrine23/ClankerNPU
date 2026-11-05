@@ -194,3 +194,10 @@ Feature flags from `npu_config.h`:
 | [docs/dba.md](docs/dba.md) | GPON dynamic bandwidth allocation |
 | [docs/debug.md](docs/debug.md) | field debug block: layout, commands, traces, troubleshooting flow and FAQ |
 | [docs/errata.md](docs/errata.md) | vendor firmware defects and how this firmware handles them |
+
+## EN7523 diagnostic foundation
+
+`make SOC=EN7523` builds a four-hart NPU v1 boot diagnostic. It is a separate
+platform target and does not implement WiFi or DMA offload yet. See
+[platform/en7523/README.md](platform/en7523/README.md) for the boot contract,
+record layout and limits.

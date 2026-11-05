@@ -22,6 +22,14 @@ CLANKER ?= 0
 # git short hash in the boot version line; pin it to compare images
 GITREV ?= $(shell git describe --always --dirty --abbrev=7 2>/dev/null || echo nogit)
 
+# EN7523 starts as an independent, DMA-free diagnostic target.
+ifeq ($(SOC),EN7523)
+.DEFAULT_GOAL := all
+.PHONY: all clean disasm check
+all clean disasm check:
+	$(MAKE) -C platform/en7523 $@ CROSS=$(CROSS) \
+		BUILD=$(abspath build/EN7523_DIAG) REFERENCE="$(REFERENCE)"
+else
 ARCH    := -march=rv32imc_zicsr_zifencei -mabi=ilp32
 CFLAGS  := $(ARCH) -Os -ffunction-sections -fdata-sections \
            -fno-builtin -ffreestanding -nostdlib \
@@ -106,3 +114,5 @@ all-variants: $(VARIANTS)
 
 $(VARIANTS):
 	$(MAKE) SOC=$(word 1,$(subst _, ,$@)) WIFI=$(word 2,$(subst _, ,$@))
+
+endif # SOC == EN7523
