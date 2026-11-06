@@ -1,5 +1,9 @@
 # Platform Services
 
+EN7523 uses the same subsystem source files with its native controller,
+64 global mutexes and NPU-clock/2 timer. See [EN7523 services](en7523/platform-services.md)
+and [runtime](en7523/runtime.md). The register descriptions below cover AN75xx.
+
 Hardware mutex, interrupts, timers and console output. Every other
 subsystem builds on these.
 
@@ -177,9 +181,15 @@ The formatter supports `%d %u %x %X %s %c %p %%`, the `l` and `ll`
 modifiers, width, `0` padding and `-` alignment. As in C, zero padding
 goes after the sign of a negative number (`%05d` of -42 is `-0042`).
 
+On EN7523, `boot_uart_init()` initializes the same printf mutex but keeps
+the host's SoC UART configuration. Its startup prints the common banner,
+frequency, version, cluster state and per-hart self-test through `npu_printf`.
+It does not reprogram the internal boot UART or register source 22. The host
+controls output through MIB21 as on AN75xx.
+
 ### Boot UART console
 
-Source 22 is the boot UART receiver. The ISR echoes each byte and feeds
+On AN75xx, source 22 is the boot UART receiver. The ISR echoes each byte and feeds
 a line parser that accepts two fixed-column commands, ended by CR:
 
 ```

@@ -5,7 +5,7 @@ OBJCOPY := $(CROSS)objcopy
 OBJDUMP := $(CROSS)objdump
 SIZE    := $(CROSS)size
 
-# SoC: AN7552, AN7581, AN7583
+# SoC: EN7523, AN7552, AN7581, AN7583
 SOC     ?= AN7583
 # WiFi: MT7916, MT7991, MT7992, MT7993, MT7996, NOWIFI
 WIFI    ?= $(if $(filter EN7523,$(SOC)),NOWIFI,MT7996)
@@ -22,26 +22,13 @@ CLANKER ?= 0
 # git short hash in the boot version line; pin it to compare images
 GITREV ?= $(shell git describe --always --dirty --abbrev=7 2>/dev/null || echo nogit)
 
-# EN7523 starts as an independent, DMA-free diagnostic target.
-ifeq ($(SOC)_$(WIFI),EN7523_DIAG)
-.DEFAULT_GOAL := all
-.PHONY: all clean disasm check
-all clean disasm check:
-	$(MAKE) -C platform/en7523 $@ CROSS=$(CROSS) \
-		BUILD=$(abspath build/EN7523_DIAG) REFERENCE="$(REFERENCE)"
-else
 ifeq ($(SOC),EN7523)
 ifneq ($(WIFI),NOWIFI)
-$(error EN7523 currently supports NOWIFI or DIAG; WiFi DMA is not ported)
+$(error EN7523 currently supports NOWIFI; the WiFi datapath is not ported)
 endif
 ARCH := -march=rv32im_zicsr_zifencei -mabi=ilp32
-LINK_SCRIPT := platform/en7523/core.ld
-SRCS_BOOT := platform/en7523/core-start.S
-EXTRA_C := platform/en7523/core.c
 else
 ARCH := -march=rv32imc_zicsr_zifencei -mabi=ilp32
-LINK_SCRIPT := link.ld
-SRCS_BOOT := crt0.S
 endif
 CFLAGS  := $(ARCH) -Os -ffunction-sections -fdata-sections \
            -fno-builtin -ffreestanding -nostdlib \
@@ -54,19 +41,20 @@ CFLAGS  := $(ARCH) -Os -ffunction-sections -fdata-sections \
            $(if $(filter 1,$(CLANKER)),-DUSE_CLANKER_DRIVER)
 ASFLAGS := $(ARCH) -D$(SOC) -D$(WIFI)
 LIBGCC  := $(shell $(CC) $(ARCH) -print-libgcc-file-name)
-LDFLAGS := -m elf32lriscv -T $(LINK_SCRIPT) -nostdlib --gc-sections --relax \
-           --print-memory-usage
 
 BUILD   := build/$(SOC)_$(WIFI)
+LINK_SCRIPT := $(BUILD)/link.ld
+LDFLAGS := -m elf32lriscv -T $(LINK_SCRIPT) -nostdlib --gc-sections --relax \
+           --print-memory-usage
 ELF     := $(BUILD)/firmware.elf
 BIN     := $(BUILD)/npu_rv32.bin
 DATA    := $(BUILD)/npu_data.bin
 MAP     := $(BUILD)/firmware.map
 DIS     := $(BUILD)/firmware.dis
 
-SRCS_S  := $(SRCS_BOOT)
-# npu_globals.c must stay first: it is the only source of .data, so its
-# order fixes the layout of npu_data.bin.
+SRCS_S  := crt0.S
+# Keep npu_globals.c first among C objects to preserve the data tables.
+# EN7523 also has a cold-boot barrier word in crt0.S.
 SRCS_C  := npu_globals.c \
            npu_main.c npu_util.c npu_mutex.c npu_plic.c npu_timer.c \
            npu_mbox.c npu_sram.c npu_bridge.c npu_printf.c \
@@ -76,7 +64,6 @@ SRCS_C  := npu_globals.c \
            npu_wifi_kite.c npu_wifi_eagle.c npu_wifi_eagle_dp.c \
            npu_tdma.c npu_hostadpt.c npu_sta_q.c \
            npu_tunnel.c npu_ppe.c npu_l4s.c
-SRCS_C += $(EXTRA_C)
 OBJS    := $(patsubst %.S,$(BUILD)/%.o,$(SRCS_S)) \
            $(patsubst %.c,$(BUILD)/%.o,$(SRCS_C))
 FLAGS   := $(BUILD)/.flags
@@ -95,12 +82,15 @@ FORCE:
 
 $(BUILD)/%.o: %.S npu_config.h $(FLAGS) | $(BUILD)
 	@mkdir -p $(dir $@)
-	$(CC) $(ASFLAGS) $(if $(filter EN7523,$(SOC)),-I.) -c -o $@ $<
+	$(CC) $(ASFLAGS) -c -o $@ $<
 
 $(BUILD)/%.o: %.c npu_config.h npu_regs.h npu_types.h npu_internal.h \
-		 npu_wifi.h $(FLAGS) | $(BUILD)
+		 npu_wifi.h npu_wlan.h $(FLAGS) | $(BUILD)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(if $(filter EN7523,$(SOC)),-I.) -c -o $@ $<
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(LINK_SCRIPT): link.ld $(FLAGS) | $(BUILD)
+	$(CC) -E -P -x c -D$(SOC) -o $@ $<
 
 $(ELF): $(OBJS) $(LINK_SCRIPT)
 	$(LD) $(LDFLAGS) -Map=$(MAP) -o $@ $(OBJS) $(LIBGCC)
@@ -116,14 +106,16 @@ disasm: $(ELF)
 
 ifeq ($(SOC),EN7523)
 check: all
-	python3 platform/en7523/test-core.py $(BUILD)
+	python3 tests/en7523-core.py $(BUILD)
+	python3 tests/en7523-core.py $(BUILD) --quiet --staggered
 endif
 
 clean:
 	rm -rf build/
 
-# Build all 11 variants
-VARIANTS := AN7552_MT7916 AN7552_MT7991 AN7552_MT7993 \
+# Build all 12 variants
+VARIANTS := EN7523_NOWIFI \
+            AN7552_MT7916 AN7552_MT7991 AN7552_MT7993 \
             AN7581_MT7916 AN7581_MT7992 AN7581_MT7996 \
             AN7583_MT7916 AN7583_MT7992 AN7583_MT7993 \
             AN7583_MT7996 AN7583_NOWIFI
@@ -134,5 +126,3 @@ all-variants: $(VARIANTS)
 
 $(VARIANTS):
 	$(MAKE) SOC=$(word 1,$(subst _, ,$@)) WIFI=$(word 2,$(subst _, ,$@))
-
-endif # SOC == EN7523

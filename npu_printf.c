@@ -323,6 +323,7 @@ int npu_printf(const char *fmt, ...)
 
 void boot_uart_init(void)
 {
+#ifndef EN7523
 	REG32(BOOT_UART_FCR) = 15;
 	REG32(BOOT_UART_MCR) = 0;
 	REG32(BOOT_UART_SCR) = 0;
@@ -332,11 +333,15 @@ void boot_uart_init(void)
 	REG32(BOOT_UART_DLL) = 1;
 	REG32(BOOT_UART_DLM) = 0;
 	REG32(BOOT_UART_LCR) = 3;		/* 8N1 */
+#endif
 
+	/* EN7523 prints through the SoC UART already configured by the host. */
 	printf_mutex_desc[0] = 15;
 	printf_mutex_desc[1] = 0;
+#ifndef EN7523
 	boot_printf("%s done via base:0x%x\n\n\n", "npu_uart_init",
 		    BOOT_UART_BASE);
+#endif
 }
 
 /* boot printf (uses boot UART at 0x1EC10000) */

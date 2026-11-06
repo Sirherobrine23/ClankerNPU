@@ -9,11 +9,13 @@
 #define CHIP_ID_REG             0x1FB00064
 #define CHIP_VARIANT_REG        0x1FB00284
 
-/* NPU cluster (boot control), eight core slots on every part */
+/* NPU cluster boot control and available debug slots. */
 #ifdef EN7523
 #define NPU_CLUSTER_BASE        0x1EC08000
+#define NPU_CLUSTER_SLOTS       4
 #else
 #define NPU_CLUSTER_BASE        0x1EC06000
+#define NPU_CLUSTER_SLOTS       8
 #endif
 #define CR_CORE_BOOT_TRIGGER    (NPU_CLUSTER_BASE + 0x000)
 #define CR_CORE_BOOT_CONFIG     (NPU_CLUSTER_BASE + 0x004)
@@ -44,6 +46,16 @@
 #define NPU_CSR_RA(core)        (NPU_DEBUG_BASE + ((core) * 0x100) + 0x08)
 
 /* Hardware mutex. off = (mutex id * 4) & HW_MUTEX_OFF_MASK; hart field is 2 bits. */
+#ifdef EN7523
+/* NPU v1: 64 global mutexes, with the owner carried in the value. */
+#define HW_MUTEX_BASE           0x1EC09800
+#define HW_MUTEX_STATUS(hart, off)  (HW_MUTEX_BASE + (off))
+#define HW_MUTEX_PRI_ACQ(off)   (HW_MUTEX_BASE + 0x700 + (off))
+#define HW_MUTEX_TRY_ACQ(off)   (HW_MUTEX_BASE + 0x200 + (off))
+#define HW_MUTEX_ACQ(off)       (HW_MUTEX_BASE + 0x300 + (off))
+#define HW_MUTEX_REL(hart, off) (HW_MUTEX_BASE + 0x400 + (off))
+#define HW_MUTEX_OFF_MASK       0xFC
+#else
 #define HW_MUTEX_BASE           0x1EC03000
 #define HW_MUTEX_HART(hart)     (((hart) << 10) & 0xC00)
 #define HW_MUTEX_STATUS(hart, off)  (HW_MUTEX_BASE + HW_MUTEX_HART(hart) + (off))
@@ -52,12 +64,13 @@
 #define HW_MUTEX_ACQ(off)       (HW_MUTEX_BASE + 0x180 + (off))
 #define HW_MUTEX_REL(hart, off) (HW_MUTEX_BASE + 0x200 + HW_MUTEX_HART(hart) + (off))
 #define HW_MUTEX_NOTIFY(hart, off) (HW_MUTEX_BASE + 0x380 + HW_MUTEX_HART(hart) + (off))
-#define HW_MUTEX_HELD           0x10000
 #ifdef AN7581
 #define HW_MUTEX_OFF_MASK       0x7C		/* 32 mutexes */
 #else
 #define HW_MUTEX_OFF_MASK       0x3C		/* 16 mutexes */
 #endif
+#endif /* EN7523 */
+#define HW_MUTEX_HELD           0x10000
 
 /* Mailbox. One 16-byte control block per queue at +0x030, matching the
  * host driver's CR_MBQ<n>_CTRL0..3. Queue index is the core id; queue 8 is
@@ -102,6 +115,17 @@
 #define HOSTADPT_IN_MAX_CNT(r)  (NPU_HOSTADPT_BASE - 0x05C + ((r) * 0x10))
 #define HOSTADPT_IN_CPU_IDX(r)  (NPU_HOSTADPT_BASE - 0x054 + ((r) * 0x10))
 
+#ifdef EN7523
+/* Native v1 controller: packed priorities and zero-based CSR source IDs. */
+#define PLIC_BASE              0x1EC09000
+#define PLIC_MAX_SOURCE        128
+#define PLIC_PRIORITY(src)     (PLIC_BASE + 0x18 + ((src) / 4) * 4)
+#define PLIC_HART_ENABLE(hart, word) \
+	(PLIC_BASE + 0x98 + (hart) * 16 + (word) * 4)
+#define PLIC_THRESHOLD(hart)   (PLIC_BASE + 0x118 + (hart) * 4)
+#define PLIC_ACTIVE(hart)      (PLIC_BASE + 0x138 + (hart) * 4)
+
+#else
 /* PLIC (Platform-Level Interrupt Controller)
  * Sources are 0-based internally; hardware uses 1-based.
  * Priority[src]: 0x0C000004 + src*4  (source src+1 in PLIC terms)
@@ -117,6 +141,7 @@
 #define PLIC_THRESHOLD_REG      0x0C200000
 #define PLIC_CLAIM_REG          0x0C200004
 #define PLIC_MAX_SOURCE         192
+#endif /* EN7523 */
 
 /* mcause: interrupt bit set, code 11 */
 #define MCAUSE_MACHINE_EXT_IRQ  0x8000000BU

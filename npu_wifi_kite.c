@@ -449,8 +449,7 @@ int wifi_mail_get_rxdesc_base(u32 *msg)
 	return 1;
 }
 
-/* GET_WAIT handlers — indexed by SDK WIFI_MAIL_Get_Wait_Func_t in
- * get_wait_func_table[10].  Each receives the DMA-translated msg pointer. */
+/* GET_WAIT handlers receive the DMA-translated message pointer. */
 
 int wifi_mail_get_npu_info(u32 *msg)
 {

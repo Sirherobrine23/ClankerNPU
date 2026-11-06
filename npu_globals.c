@@ -19,9 +19,6 @@
 
 /* 0x000: system config base */
 u32 npu_max_frame_size = 1500;
-#ifdef EN7523
-volatile u32 en7523_core_data_magic = 0x434f5245;
-#endif
 
 /* 0x010 - 0x14C: five per-timer tables. AN7583 has a second bank of 8
  * timers at 0x1EC10200; AN7581 exposes only 4. */
@@ -77,103 +74,101 @@ u32 timer_reload_reg[NPU_TIMER_NUM] = {
 u32 timer_pair_bit[4] = { 0x19, 0x1a, 0x1b, 0x1c };
 #endif
 
-/* 0x180: GET_WAIT function table (indexed by SDK WIFI_MAIL_Get_Wait_Func_t) */
-#ifdef HAS_WIFI
-typedef int (*wifi_mail_fn_t)(u32 *msg);
+/* Host command tables use explicit wire IDs; empty entries are unsupported. */
+wifi_mail_fn_t get_wait_func_table[WLAN_FUNC_GET_WAIT_MAX]
+	__attribute__((section(".data"))) = {
+	[WLAN_FUNC_GET_WAIT_NPU_VERSION] = wifi_mail_get_npu_version,
 #ifdef WIFI_KITE
-wifi_mail_fn_t get_wait_func_table[10] __attribute__((section(".data"))) = {
-	wifi_mail_get_npu_info,
-	wifi_mail_get_last_rate,
-	wifi_mail_get_counter,
-	wifi_mail_get_dbg_counter,
-	wifi_mail_get_rxdesc_base,
-	wifi_mail_get_wcid_dbg_counter,
-	wifi_mail_get_dma_addr,
-	wifi_mail_get_ring_size,
-	wifi_mail_get_mdc_lock,
-	wifi_mail_get_dump_mapping,
-};
-wifi_mail_fn_t set_wait_func_table[31] __attribute__((section(".data"))) = {
-	wifi_mail_set_pcie_addr,
-	wifi_mail_set_desc,
-	wifi_mail_set_init_done,
-	wifi_mail_set_tran_to_cpu,
-	wifi_mail_set_ba_win_size,
-	wifi_mail_set_driver_model_cmd,
-	wifi_mail_set_del_sta,
-	wifi_mail_set_dram_ba_node,
-	wifi_mail_set_pkt_buf,
-	wifi_mail_set_test_noba,
-	wifi_mail_set_flushone,
-	wifi_mail_set_flushall,
-	wifi_mail_set_force_cpu,
-	wifi_mail_set_pcie_state,
-	wifi_mail_set_port_type,
-	wifi_mail_set_retry,
-	wifi_mail_set_bar_info_cmd,
-	wifi_mail_set_fast_flag_cmd,
-	wifi_mail_set_band0_cpu,
-	wifi_mail_set_tx_ring_pcie,
-	wifi_mail_set_tx_desc_hw,
-	wifi_mail_set_tx_buf_hw,
-	wifi_mail_set_rx_txdone_hw,
-	wifi_mail_set_tx_pkt_buf,
-	wifi_mail_set_txrx_reg,
-	wifi_mail_set_debug_flag,
-	wifi_mail_set_wait_inode_cfg,
-	wifi_mail_set_wait_inode_stop,
-	wifi_mail_set_pcie_swap,
-	wifi_mail_set_ratelimit,
-	wifi_mail_set_arht_chip_info,
-};
+	[WLAN_FUNC_GET_WAIT_NPU_INFO] = wifi_mail_get_npu_info,
+	[WLAN_FUNC_GET_WAIT_LAST_RATE] = wifi_mail_get_last_rate,
+	[WLAN_FUNC_GET_WAIT_COUNTER] = wifi_mail_get_counter,
+	[WLAN_FUNC_GET_WAIT_DBG_COUNTER] = wifi_mail_get_dbg_counter,
+	[WLAN_FUNC_GET_WAIT_RXDESC_BASE] = wifi_mail_get_rxdesc_base,
+	[WLAN_FUNC_GET_WAIT_WCID_DBG_COUNTER] = wifi_mail_get_wcid_dbg_counter,
+	[WLAN_FUNC_GET_WAIT_DMA_ADDR] = wifi_mail_get_dma_addr,
+	[WLAN_FUNC_GET_WAIT_RING_SIZE] = wifi_mail_get_ring_size,
+#elif defined(WIFI_EAGLE)
+	[WLAN_FUNC_GET_WAIT_NPU_INFO] = eagle_mail_get_npu_info,
+	[WLAN_FUNC_GET_WAIT_LAST_RATE] = eagle_mail_get_last_rate,
+	[WLAN_FUNC_GET_WAIT_COUNTER] = eagle_mail_get_counter,
+	[WLAN_FUNC_GET_WAIT_DBG_COUNTER] = eagle_mail_get_dbg_counter,
+	[WLAN_FUNC_GET_WAIT_RXDESC_BASE] = eagle_mail_get_rxdesc_base,
+	[WLAN_FUNC_GET_WAIT_WCID_DBG_COUNTER] = eagle_mail_get_wcid_dbg_counter,
+	[WLAN_FUNC_GET_WAIT_DMA_ADDR] = eagle_mail_get_dma_addr,
+	[WLAN_FUNC_GET_WAIT_RING_SIZE] = eagle_mail_get_ring_size,
 #else
-wifi_mail_fn_t get_wait_func_table[10] __attribute__((section(".data"))) = {
-	eagle_mail_get_npu_info,
-	eagle_mail_get_last_rate,
-	eagle_mail_get_counter,
-	eagle_mail_get_dbg_counter,
-	eagle_mail_get_rxdesc_base,
-	eagle_mail_get_wcid_dbg_counter,
-	eagle_mail_get_dma_addr,
-	eagle_mail_get_ring_size,
-	eagle_mail_get_mdc_lock,
-	eagle_mail_get_dump_mapping,
-};
-wifi_mail_fn_t set_wait_func_table[31] __attribute__((section(".data"))) = {
-	eagle_mail_set_pcie_addr,
-	eagle_mail_set_desc,
-	eagle_mail_set_init_done,
-	eagle_mail_set_tran_to_cpu,
-	eagle_mail_set_ba_win_size,
-	eagle_mail_set_driver_model,
-	eagle_mail_set_del_sta,
-	eagle_mail_set_dram_ba_node,
-	eagle_mail_set_pkt_buf,
-	eagle_mail_set_test_noba,
-	eagle_mail_set_flushone,
-	eagle_mail_set_flushall,
-	eagle_mail_set_force_cpu,
-	eagle_mail_set_pcie_state,
-	eagle_mail_set_port_type,
-	eagle_mail_set_retry,
-	eagle_mail_set_bar_info,
-	eagle_mail_set_fast_flag,
-	eagle_mail_set_band0_cpu,
-	eagle_mail_set_tx_ring_pcie,
-	eagle_mail_set_tx_desc_hw,
-	eagle_mail_set_tx_buf_hw,
-	eagle_mail_set_rx_txdone_hw,
-	eagle_mail_set_tx_pkt_buf,
-	eagle_mail_set_txrx_reg,
-	eagle_mail_set_debug_flag,
-	eagle_mail_set_inode_cfg,
-	eagle_mail_set_inode_stop,
-	eagle_mail_set_pcie_swap,
-	eagle_mail_set_ratelimit,
-	eagle_mail_set_arht_chip_info,
-};
+	[WLAN_FUNC_GET_WAIT_NPU_INFO] = wifi_mail_get_npu_info,
 #endif
+};
+
+wifi_mail_fn_t set_wait_func_table[WLAN_FUNC_SET_WAIT_MAX]
+	__attribute__((section(".data"))) = {
+#ifdef WIFI_KITE
+	[WLAN_FUNC_SET_WAIT_PCIE_ADDR] = wifi_mail_set_pcie_addr,
+	[WLAN_FUNC_SET_WAIT_DESC] = wifi_mail_set_desc,
+	[WLAN_FUNC_SET_WAIT_NPU_INIT_DONE] = wifi_mail_set_init_done,
+	[WLAN_FUNC_SET_WAIT_TRAN_TO_CPU] = wifi_mail_set_tran_to_cpu,
+	[WLAN_FUNC_SET_WAIT_BA_WIN_SIZE] = wifi_mail_set_ba_win_size,
+	[WLAN_FUNC_SET_WAIT_DRIVER_MODEL] = wifi_mail_set_driver_model_cmd,
+	[WLAN_FUNC_SET_WAIT_DEL_STA] = wifi_mail_set_del_sta,
+	[WLAN_FUNC_SET_WAIT_DRAM_BA_NODE_ADDR] = wifi_mail_set_dram_ba_node,
+	[WLAN_FUNC_SET_WAIT_PKT_BUF_ADDR] = wifi_mail_set_pkt_buf,
+	[WLAN_FUNC_SET_WAIT_IS_TEST_NOBA] = wifi_mail_set_test_noba,
+	[WLAN_FUNC_SET_WAIT_FLUSHONE_TIMEOUT] = wifi_mail_set_flushone,
+	[WLAN_FUNC_SET_WAIT_FLUSHALL_TIMEOUT] = wifi_mail_set_flushall,
+	[WLAN_FUNC_SET_WAIT_IS_FORCE_TO_CPU] = wifi_mail_set_force_cpu,
+	[WLAN_FUNC_SET_WAIT_PCIE_STATE] = wifi_mail_set_pcie_state,
+	[WLAN_FUNC_SET_WAIT_PCIE_PORT_TYPE] = wifi_mail_set_port_type,
+	[WLAN_FUNC_SET_WAIT_ERROR_RETRY_TIMES] = wifi_mail_set_retry,
+	[WLAN_FUNC_SET_WAIT_BAR_INFO] = wifi_mail_set_bar_info_cmd,
+	[WLAN_FUNC_SET_WAIT_FAST_FLAG] = wifi_mail_set_fast_flag_cmd,
+	[WLAN_FUNC_SET_WAIT_NPU_BAND0_ONCPU] = wifi_mail_set_band0_cpu,
+	[WLAN_FUNC_SET_WAIT_TX_RING_PCIE_ADDR] = wifi_mail_set_tx_ring_pcie,
+	[WLAN_FUNC_SET_WAIT_TX_DESC_HW_BASE] = wifi_mail_set_tx_desc_hw,
+	[WLAN_FUNC_SET_WAIT_TX_BUF_SPACE_HW_BASE] = wifi_mail_set_tx_buf_hw,
+	[WLAN_FUNC_SET_WAIT_RX_RING_FOR_TXDONE_HW_BASE] = wifi_mail_set_rx_txdone_hw,
+	[WLAN_FUNC_SET_WAIT_TX_PKT_BUF_ADDR] = wifi_mail_set_tx_pkt_buf,
+	[WLAN_FUNC_SET_WAIT_INODE_TXRX_REG_ADDR] = wifi_mail_set_txrx_reg,
+	[WLAN_FUNC_SET_WAIT_INODE_DEBUG_FLAG] = wifi_mail_set_debug_flag,
+	[WLAN_FUNC_SET_WAIT_INODE_HW_CFG_INFO] = wifi_mail_set_wait_inode_cfg,
+	[WLAN_FUNC_SET_WAIT_INODE_STOP_ACTION] = wifi_mail_set_wait_inode_stop,
+	[WLAN_FUNC_SET_WAIT_INODE_PCIE_SWAP] = wifi_mail_set_pcie_swap,
+	[WLAN_FUNC_SET_WAIT_RATELIMIT_CTRL] = wifi_mail_set_ratelimit,
+	[WLAN_FUNC_SET_WAIT_ARHT_CHIP_INFO] = wifi_mail_set_arht_chip_info,
+#elif defined(WIFI_EAGLE)
+	[WLAN_FUNC_SET_WAIT_PCIE_ADDR] = eagle_mail_set_pcie_addr,
+	[WLAN_FUNC_SET_WAIT_DESC] = eagle_mail_set_desc,
+	[WLAN_FUNC_SET_WAIT_NPU_INIT_DONE] = eagle_mail_set_init_done,
+	[WLAN_FUNC_SET_WAIT_TRAN_TO_CPU] = eagle_mail_set_tran_to_cpu,
+	[WLAN_FUNC_SET_WAIT_BA_WIN_SIZE] = eagle_mail_set_ba_win_size,
+	[WLAN_FUNC_SET_WAIT_DRIVER_MODEL] = eagle_mail_set_driver_model,
+	[WLAN_FUNC_SET_WAIT_DEL_STA] = eagle_mail_set_del_sta,
+	[WLAN_FUNC_SET_WAIT_DRAM_BA_NODE_ADDR] = eagle_mail_set_dram_ba_node,
+	[WLAN_FUNC_SET_WAIT_PKT_BUF_ADDR] = eagle_mail_set_pkt_buf,
+	[WLAN_FUNC_SET_WAIT_IS_TEST_NOBA] = eagle_mail_set_test_noba,
+	[WLAN_FUNC_SET_WAIT_FLUSHONE_TIMEOUT] = eagle_mail_set_flushone,
+	[WLAN_FUNC_SET_WAIT_FLUSHALL_TIMEOUT] = eagle_mail_set_flushall,
+	[WLAN_FUNC_SET_WAIT_IS_FORCE_TO_CPU] = eagle_mail_set_force_cpu,
+	[WLAN_FUNC_SET_WAIT_PCIE_STATE] = eagle_mail_set_pcie_state,
+	[WLAN_FUNC_SET_WAIT_PCIE_PORT_TYPE] = eagle_mail_set_port_type,
+	[WLAN_FUNC_SET_WAIT_ERROR_RETRY_TIMES] = eagle_mail_set_retry,
+	[WLAN_FUNC_SET_WAIT_BAR_INFO] = eagle_mail_set_bar_info,
+	[WLAN_FUNC_SET_WAIT_FAST_FLAG] = eagle_mail_set_fast_flag,
+	[WLAN_FUNC_SET_WAIT_NPU_BAND0_ONCPU] = eagle_mail_set_band0_cpu,
+	[WLAN_FUNC_SET_WAIT_TX_RING_PCIE_ADDR] = eagle_mail_set_tx_ring_pcie,
+	[WLAN_FUNC_SET_WAIT_TX_DESC_HW_BASE] = eagle_mail_set_tx_desc_hw,
+	[WLAN_FUNC_SET_WAIT_TX_BUF_SPACE_HW_BASE] = eagle_mail_set_tx_buf_hw,
+	[WLAN_FUNC_SET_WAIT_RX_RING_FOR_TXDONE_HW_BASE] = eagle_mail_set_rx_txdone_hw,
+	[WLAN_FUNC_SET_WAIT_TX_PKT_BUF_ADDR] = eagle_mail_set_tx_pkt_buf,
+	[WLAN_FUNC_SET_WAIT_INODE_TXRX_REG_ADDR] = eagle_mail_set_txrx_reg,
+	[WLAN_FUNC_SET_WAIT_INODE_DEBUG_FLAG] = eagle_mail_set_debug_flag,
+	[WLAN_FUNC_SET_WAIT_INODE_HW_CFG_INFO] = eagle_mail_set_inode_cfg,
+	[WLAN_FUNC_SET_WAIT_INODE_STOP_ACTION] = eagle_mail_set_inode_stop,
+	[WLAN_FUNC_SET_WAIT_INODE_PCIE_SWAP] = eagle_mail_set_pcie_swap,
+	[WLAN_FUNC_SET_WAIT_RATELIMIT_CTRL] = eagle_mail_set_ratelimit,
+	[WLAN_FUNC_SET_WAIT_ARHT_CHIP_INFO] = eagle_mail_set_arht_chip_info,
 #endif
+};
 
 /* 0x1EC: WiFi chip name table (kite only, 8 bytes per entry) */
 #ifdef WIFI_KITE

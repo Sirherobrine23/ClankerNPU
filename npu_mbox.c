@@ -1,5 +1,5 @@
 /*
- * AN75XX NPU firmware - mailbox
+ * ClankerNPU firmware - mailbox
  *
  * The host reaches the firmware through the mailbox block at 0x1EC0C000.
  * Mailbox n+1 interrupts core n. Queue 8 carries notifications from the
@@ -13,12 +13,12 @@
  * Mailbox communication
  *
  * 80 bytes per core in dispatch table:
- *   [0..63]  = raw data DWORDs (16 slots, indexed by func_id)
- *   [32..63] = raw data WORDs (overlaps with above)
+ *   [0..31]  = raw data DWORDs (8 slots, indexed by func_id)
+ *   [32..47] = raw data lengths (8 WORDs)
  *   [48..79] = callback function pointers (8 slots)
  * ================================================================ */
 
-/* mailbox dispatch table: 6 cores x 80 bytes */
+/* Per-hart dispatch table: 80 bytes per core. */
 u8 mbox_dispatch[MAX_CORE_NUM][80];
 
 
@@ -26,7 +26,8 @@ void mbox_isr(int src)
 {
 	u32 mbox_idx = (u8)(src - 8);
 	u32 core = get_hartid();
-	u32 rptr, base_ptr, max_cnt, func_idx, ret = 0;
+	u32 rptr, base_ptr, max_cnt, func_idx, ret;
+	u32 *callbacks;
 	mbox_handler_t handler;
 
 	if (mbox_idx != core) {
@@ -49,20 +50,23 @@ void mbox_isr(int src)
 	max_cnt = REG32(MBQ_CTRL1(mbox_idx)) & 0xFFFF;
 	rptr = REG32(MBQ_CTRL3(mbox_idx)) & 0xFFFF;
 
+	func_idx = (rptr >> 11) & 0xF;
+	if (func_idx >= MAX_MBOX_FUNC) {
+		ret = NPU_MBOX_EINVAL;
+		goto respond;
+	}
+#ifdef EN7523
+	if (rptr & 0x20) {
+		ret = NPU_MBOX_EOPNOTSUPP;
+		goto respond;
+	}
+#endif
+
 	/* set response status if not already set */
 	if (!(rptr & 1)) {
 		rptr = ((rptr & 0xFF00u) | (rptr & 0xE1) | 0x6) & 0xFFFF;
 		REG32(MBQ_CTRL3(mbox_idx)) = rptr;
 	}
-
-	func_idx = (rptr >> 11) & 0xF;
-#ifdef EN7523
-	/* This core-only image never accepts vendor offload or notify requests. */
-	if (func_idx != 7 || (rptr & 0x21) != 1) {
-		REG32(MBQ_CTRL3(mbox_idx)) = (rptr & ~0x1Cu) | 2;
-		return;
-	}
-#endif
 
 	if (rptr & 0x20) {
 		/* raw data path: store base_ptr and max_cnt */
@@ -71,30 +75,28 @@ void mbox_isr(int src)
 
 		data[func_idx] = base_ptr;
 		cnt[func_idx] = (u16)max_cnt;
-	} else {
-		/* callback path: dispatch to handler */
-		u32 *callbacks = (u32 *)&mbox_dispatch[mbox_idx][48];
-
-		handler = (mbox_handler_t)(void *)callbacks[func_idx];
-		if (handler) {
-			ret = (u32)handler(base_ptr, max_cnt);
-			rptr = (rptr & 0xFFFFFFE3u) | ((ret & 7) << 2);
-		}
-
-		ndbg->hart[core].mails++;
-		ndbg->hart[core].last_mail = func_idx << 24 |
-			(base_ptr & 0xFFFF) << 8 | (ret & 0xFF);
-		NDBG_TRACE(NDBG_MBOX, mbox_idx << 8 | func_idx, base_ptr, ret);
-
-		/* blocking: set done; else return result via queue 8 */
-#ifdef EN7523
-		__asm__ volatile("fence iorw, iorw" ::: "memory");
-#endif
-		if (rptr & 1)
-			REG32(MBQ_CTRL3(mbox_idx)) = (rptr | 2) & 0xFFFF;
-		else
-			mbox_notify_host(core, func_idx, ret);
+		return;
 	}
+
+	callbacks = (u32 *)&mbox_dispatch[mbox_idx][48];
+	handler = (mbox_handler_t)(void *)callbacks[func_idx];
+	ret = handler ? (u32)handler(base_ptr, max_cnt) : NPU_MBOX_ENODEV;
+
+respond:
+	rptr = (rptr & ~0x1Cu) | ((ret & 7) << 2);
+	ndbg->hart[core].mails++;
+	ndbg->hart[core].last_mail = func_idx << 24 |
+		(base_ptr & 0xFFFF) << 8 | (ret & 0xFF);
+	NDBG_TRACE(NDBG_MBOX, mbox_idx << 8 | func_idx, base_ptr, ret);
+
+	/* blocking: set done; else return result via queue 8 */
+#ifdef EN7523
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+#endif
+	if (rptr & 1)
+		REG32(MBQ_CTRL3(mbox_idx)) = (rptr | 2) & 0xFFFF;
+	else
+		mbox_notify_host(core, func_idx, ret);
 }
 
 void mailbox_init(void)
@@ -103,12 +105,17 @@ void mailbox_init(void)
 	u32 *callbacks;
 
 
-#ifndef EN7523
+#ifdef EN7523
+	/* Each hart enables its own source after the shared table is ready. */
+	for (i = 0; i < MAX_CORE_NUM; i++)
+		REG32(MBOX_INT_MASK(i + 1)) = 1u << i;
+#else
 	/* route mailbox n to core n-1 */
 	for (i = 0; i < MAX_CORE_NUM; i++) {
 		REG32(MBOX_INT_MASK(i + 1)) = (1u << i);
 		plic_register_isr(8 + i, mbox_isr);
 	}
+#endif
 
 	REG32(MBOX_INT_MASK0) = 256;
 #if defined(AN7581)
@@ -118,20 +125,14 @@ void mailbox_init(void)
 #endif
 	mbox_notify_mutex[1] = 0;
 
-
-#endif
 	/* zero all dispatch tables */
 	for (i = 0; i < MAX_CORE_NUM; i++)
 		npu_memset(mbox_dispatch[i], 0, 80);
 
 	/* register handlers into core 0's callback slots */
 	callbacks = (u32 *)&mbox_dispatch[0][48];
-#ifdef HAS_WIFI
 	callbacks[0] = (u32)(void *)wifi_mail_dispatch;
-#endif
-#ifdef EN7523
-	callbacks[7] = (u32)(void *)en7523_diag_mail;
-#else
+#ifndef EN7523
 	callbacks[1] = (u32)(void *)tunnel_mail_dispatch;
 #endif
 
@@ -166,6 +167,9 @@ int mbox_notify_host(u32 core_id, u32 func_id, u32 len)
 	REG32(MBQ_CTRL0(MBQ_NOTIFY)) = core_id & 0xF;
 	REG32(MBQ_CTRL1(MBQ_NOTIFY)) = len & 0xFFFF;
 	REG32(MBQ_CTRL3(MBQ_NOTIFY)) = (func_id & 0xF) << 11;
+#ifdef EN7523
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+#endif
 	REG32(MBQ_CTRL2(MBQ_NOTIFY)) = REG32(MBQ_CTRL2(MBQ_NOTIFY)) + 1;
 
 	sts = REG32(MBQ_CTRL3(MBQ_NOTIFY)) & 0xFFFF;
@@ -174,10 +178,12 @@ int mbox_notify_host(u32 core_id, u32 func_id, u32 len)
 		sts = REG32(MBQ_CTRL3(MBQ_NOTIFY)) & 0xFFFF;
 	}
 
+#ifndef EN7523
 	if (!(sts & 2))
 		npu_printf("Error: %s timeout for core_id:%d, func_id:%d\n",
 			   "npuMbox_notify_host", core_id, func_id);
+#endif
 
 	hw_mutex_unlock_pri(mbox_notify_mutex);
-	return (sts & 2) ? (sts >> 2) & 7 : 0;
+	return (sts & 2) ? (sts >> 2) & 7 : NPU_MBOX_ERROR;
 }

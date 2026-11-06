@@ -4,12 +4,12 @@
 #include "npu_config.h"
 #include "npu_types.h"
 #include "npu_regs.h"
-#ifdef EN7523
+#include "npu_wlan.h"
+
 void trap_vector(void);
-void en7523_core_init(void);
-void en7523_core_loop(void) __attribute__((noreturn));
-int en7523_diag_mail(u32 base, u32 size);
-u32 en7523_terminal_trap(u32 cause, u32 pc, u32 *sp);
+#ifdef EN7523
+void plic_global_init(void);
+void plic_handle_irq(void);
 #endif
 
 /* per-packet code: one contiguous block stays inside the 8 KB
@@ -284,13 +284,17 @@ void tdma_tx_init(void);
 #endif
 void core0_wifi_init_wrapper(void);
 void core3_wifi_init_wrapper(void);
+int wifi_mail_dispatch(u32 base, u32 cnt);
+int wifi_mail_get_npu_version(u32 *msg);
+#ifndef HAS_WIFI
+int wifi_mail_get_npu_info(u32 *msg);
+#endif
 #ifdef HAS_WIFI
 void buf_mgr_init(void);
 #if defined(WIFI_KITE) && !defined(HAS_BME)
 s32 buf_mgr_alloc(void);
 void buf_mgr_free(u32 buf_id);
 #endif
-int wifi_mail_dispatch(u32 base, u32 cnt);
 void wifi_bridge_loop(void);
 #ifdef WIFI_KITE
 void kite_core1_loop(void);
@@ -466,10 +470,8 @@ extern u32 timer_pair_bit[4];
 #endif
 
 
-#ifdef HAS_WIFI
-extern wifi_mail_fn_t get_wait_func_table[];
-extern wifi_mail_fn_t set_wait_func_table[];
-#endif
+extern wifi_mail_fn_t get_wait_func_table[WLAN_FUNC_GET_WAIT_MAX];
+extern wifi_mail_fn_t set_wait_func_table[WLAN_FUNC_SET_WAIT_MAX];
 #ifdef WIFI_KITE
 extern const char wifi_chip_names[6][8];
 #endif

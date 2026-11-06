@@ -31,6 +31,18 @@ void timer_isr(int src)
 	u32 base;
 	u32 tick;
 
+#ifdef EN7523
+	/* NPU v1 has three counters and one watchdog in this control word. */
+	(void)tick;
+	base = NPU_TIMER0_BASE;
+	timer_prev_ctrl = REG32(base);
+	REG32(base) = (timer_prev_ctrl & 0x02000027) | (1u << bit);
+	timer_int_count++;
+	timer_raw_tick++;
+	if (timer_raw_tick % 100 == 0)
+		timer_slow_tick++;
+	return;
+#endif
 	if (src >= 24 && src <= 31)
 		base = NPU_TIMER1_BASE;
 	else
@@ -71,13 +83,29 @@ void timer_init(int timer, int enable, int period)
 	u32 pair = 0;
 	u32 ctrl;
 
+#ifdef EN7523
+	/* Keep the v1 timer path independent of AN75xx pairing/clock rules.
+	 * Period is milliseconds; only hart 2 enables source 18. */
+	if (timer != 0 || period <= 0)
+		return;
+	(void)pair;
+	ctrl = REG32(NPU_TIMER0_BASE) & 0x02000027;
+	REG32(NPU_TIMER0_BASE) = (ctrl & ~1u) | (1u << 16);
+	if (!enable)
+		return;
+	timer_int_count = 0;
+	timer_clk_mhz = cpu_clock_get() >> 1;
+	REG32(timer_reload_reg[0]) = 1000 * (u32)period * timer_clk_mhz;
+	REG32(NPU_TIMER0_BASE) = ctrl | 1u;
+	return;
+#endif
 	timer_int_count = 0;
 	if ((u32)timer >= NPU_TIMER_NUM) {
 		npu_printf("%s timer_no:%d is wrong, should be smaller than %d\n",
 			   "timer_init", timer, NPU_TIMER_NUM);
 		return;
 	}
-#if !defined(AN7581)
+#if !defined(AN7581) && !defined(EN7523)
 	if ((u32)(timer - 3) <= 3)
 		pair = timer_pair_bit[timer - 3];
 #endif
@@ -130,12 +158,21 @@ void delay_1ms(u32 ms)
 
 u32 cpu_clock_get(void)
 {
+#ifdef EN7523
+	u32 cfg = REG32(0x1fa201bc);
+	static const u32 en7523_pll_mhz[] = { 500, 540 };
+
+	if (sim_mode_flag)
+		return 64;
+	return en7523_pll_mhz[(cfg >> 8) & 1] / ((cfg & 7) + 1);
+#else
 	static const u32 pll_freq[] = PLL_FREQ_TABLE;
 
 	if (sim_mode_flag != 0)
 		return 100;
 	return pll_freq[(REG32(PLL_CFG_REG) >> PLL_SEL_SHIFT) & 3] /
 	       ((REG32(PLL_CFG_REG) & 7) + 1);
+#endif
 }
 
 static u32 cpu_clock_div2(void)
@@ -203,7 +240,11 @@ static void cpu_timer_init(int idx, int enable, int period)
 
 void delay_us(u32 us)
 {
+#ifdef EN7523
+	u32 target = cpu_clock_get() * us;
+#else
 	u32 target = 800 * us;
+#endif
 	u32 prev = csr_read(mcycle);
 	u32 elapsed = 0;
 

@@ -1,5 +1,9 @@
 # Memory
 
+The layouts below cover AN75xx. EN7523 uses SRAM-C at `0x1E900000`,
+fixed stacks at `0x840D0000` and telemetry at `0x840F0000`; its reservations
+are selected in the common `link.ld`. See [the EN7523 runtime](en7523/runtime.md).
+
 ## Address map
 
 ```

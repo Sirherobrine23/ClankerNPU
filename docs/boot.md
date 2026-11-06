@@ -1,5 +1,14 @@
 # Boot and Core Dispatch
 
+All SoCs use the same `npu_init()` sequence: a primary/secondary barrier,
+local interrupt setup, shared initialization on hart 0, release of the other
+harts, a per-hart self-test and the MIB31 boot signature. Variant branches
+cover the hardware reset, native interrupt gates, console and SRAM limits.
+
+EN7523 retains its original md32rv boot prefix, an assembly BSS barrier and
+fixed DRAM stacks. See [the EN7523 runtime](en7523/runtime.md). The startup
+assembly and reset-register sequence below describe AN75xx.
+
 The host loads `npu_rv32.bin` to DRAM at `0x84000000` and `npu_data.bin`
 to SRAM at `0x3E900000`, then releases every hart at `_start`.
 
@@ -44,9 +53,15 @@ sequenceDiagram
 ```
 
 Every hart runs `plic_init`, points `mtvec` at `trap_vector` and sets
-`mie` to `0x800` (machine external interrupt only).
+`mie` to `0x800` (machine external interrupt only). EN7523 keeps delivery
+masked until the shared setup is published. It then enables its own mailbox
+source, source 18 on hart 2 and the native MCTREN interrupt gate.
 
-The reset block runs once, gated by `npu_reset_pending` (1 in `.data`):
+Shared initialization runs once, gated by `npu_reset_pending` (1 in `.data`).
+Every SoC initializes the printf mutex, common debug block, boot logs, timer 0
+and mailbox dispatch. EN7523 also initializes native packed priorities before
+releasing the other harts. Only AN75xx executes the internal-bus reset,
+thread-manager writes and boot-UART RX registration shown below:
 
 ```
 MIB21 (0x1EC0C194) saved              printf gate, lost across the reset
@@ -72,6 +87,13 @@ mailbox_init
 
 The reset control is `RSTCTRL1` at SCU + `0x834`. Writing SCU + `0x000`
 instead leaves the hart stuck on its next MMIO access.
+
+The common boot logs print the banner, frequency, source version and cluster
+state. The EN7523 host releases harts sequentially, so its cluster probe waits
+up to 500 ms for all four enable bits and the last hart to fetch before
+sampling their PCs. It reads
+four debug slots; AN75xx keeps its eight-slot probe. EN7523 checks globals
+against `0x6800`; AN75xx retains `0x7800` and the linker's per-part debug limit.
 
 Before `MIB31`, every hart prints its ISA and id registers and the result
 of a fixed multiply, divide and memory pass

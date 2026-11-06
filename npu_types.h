@@ -15,6 +15,15 @@ typedef signed long long s64;
 typedef void (*isr_fn_t)(int src);
 typedef int (*mbox_handler_t)(u32 base_ptr, u32 max_cnt);
 
+/* Mailbox response status in CTRL3 bits 4:2, shared with the host driver. */
+enum npu_mbox_status {
+	NPU_MBOX_ERROR = 0,
+	NPU_MBOX_SUCCESS = 1,
+	NPU_MBOX_EINVAL = 2,
+	NPU_MBOX_EOPNOTSUPP = 3,
+	NPU_MBOX_ENODEV = 4,
+};
+
 /* RISC-V CSR access */
 #define csr_read(reg) ({ \
 	unsigned long __v; \

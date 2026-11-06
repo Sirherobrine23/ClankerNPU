@@ -2,15 +2,22 @@
 #define NPU_CONFIG_H
 
 /* Boot version line: release.wifi chip.git hash */
-#define NPU_INIT_VERSION    "TLB7.8.0.0_v003"
+#define NPU_VERSION_MAJOR	7
+#define NPU_VERSION_MINOR	8
+#define NPU_VERSION_CODE	((NPU_VERSION_MAJOR << 16) | NPU_VERSION_MINOR)
+#define NPU_STRINGIFY_(x)	#x
+#define NPU_STRINGIFY(x)	NPU_STRINGIFY_(x)
+#define NPU_INIT_VERSION	"TLB" NPU_STRINGIFY(NPU_VERSION_MAJOR) "." \
+			NPU_STRINGIFY(NPU_VERSION_MINOR) ".0.0_v003"
 #define NPU_VERSION	NPU_INIT_VERSION "." NPU_WIFI_NAME "." NPU_GIT_REV
 
 /*
  * Build-time variant selection.
- * Define exactly one SoC: AN7552, AN7581, AN7583
+ * Define exactly one SoC: EN7523, AN7552, AN7581, AN7583
  * Define exactly one WiFi chip (or NOWIFI): MT7916, MT7991, MT7992, MT7993, MT7996, NOWIFI
  *
  * SoC → core count:
+ *   EN7523 → 4 cores
  *   AN7552 → 2 cores
  *   AN7581 → 8 cores
  *   AN7583 → 6 cores
@@ -42,7 +49,7 @@
 #define AN75XX
 #define AN758X
 #else
-#error "Define one SoC: AN7552, AN7581, or AN7583"
+#error "Define one SoC: EN7523, AN7552, AN7581, or AN7583"
 #endif
 
 #if defined(MT7916) || defined(MT7996)

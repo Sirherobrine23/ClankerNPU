@@ -26,11 +26,33 @@ CTRL3 bits:
 | 5     | store only: keep the buffer, call nothing |
 | 14:11 | function slot                             |
 
+## Response status
+
+The status field is a three-bit protocol value, not a negative Linux errno.
+Values in `enum npu_mbox_status` match the host driver's enum:
+
+| Value | Name | Meaning |
+| ---: | --- | --- |
+| 0 | `NPU_MBOX_ERROR` | legacy generic failure |
+| 1 | `NPU_MBOX_SUCCESS` | operation completed successfully |
+| 2 | `NPU_MBOX_EINVAL` | malformed request, buffer, operation type or function slot |
+| 3 | `NPU_MBOX_EOPNOTSUPP` | command or transport mode is not implemented |
+| 4 | `NPU_MBOX_ENODEV` | no handler is registered for this hart/function endpoint |
+
+Callers must compare against `NPU_MBOX_SUCCESS`: error codes are also nonzero.
+The firmware replaces old status bits on every callback response. Blocking
+responses publish the code in CTRL3 bits 4:2 and set DONE. Asynchronous replies
+carry the same code in queue 8's CTRL1 value.
+
+The common transport validates function slots before indexing the eight-entry
+callback table. Missing callbacks return ENODEV. Existing subsystem handlers
+that return 0 retain their generic-error meaning; successful replies remain 1.
+
 ## Mail flow
 
 ```mermaid
 flowchart TD
-  A["host writes CTRL0..3, bumps CTRL2"] --> B["PLIC source 8+n on core n"]
+  A["host writes CTRL0/1/3, then increments CTRL2"] --> B["PLIC source 8+n on core n"]
   B --> C{"queue index == mhartid?"}
   C -->|no| X["print error, return"]
   C -->|yes| D["clear status bit"]
@@ -44,14 +66,15 @@ flowchart TD
 ```
 
 `mailbox_init` (core 0, at boot) routes queue n to core n, registers
-`mbox_isr` on sources 8..8+N-1 and fills the handler slots.
+`mbox_isr` on sources 8..8+N-1 and fills the handler slots. EN7523 initializes
+the shared routing/table on hart 0, then each hart enables its own source.
 
 ## Function slots
 
 | core | slot | handler                                  | built when              |
 | ---: | ---: | ---------------------------------------- | ----------------------- |
-|    0 |    0 | `wifi_mail_dispatch`                     | a WiFi chip is selected |
-|    0 |    1 | `tunnel_mail_dispatch`                   | always                  |
+|    0 |    0 | `wifi_mail_dispatch`                     | all variants |
+|    0 |    1 | `tunnel_mail_dispatch`                   | AN75xx                  |
 |    0 |    4 | `kite_wifi_config` / `eagle_wifi_config` | AN7581 with WiFi        |
 |    0 |    5 | `hwnat_mail_dispatch`                    | AN7581, AN7583          |
 |    5 |    3 | `dba_mail_handler`                       | AN7583 with WiFi        |
@@ -66,8 +89,9 @@ flowchart TD
 4. poll `CTRL3` bit 1 for up to 30 ms,
 5. release the mutex.
 
-A timeout prints `Error: npuMbox_notify_host timeout ...` and returns 0;
-otherwise it returns the host's `CTRL3` bits 4:2.
+A timeout returns `NPU_MBOX_ERROR`; AN75xx also prints
+`Error: npuMbox_notify_host timeout ...`. Otherwise the function returns the
+host's CTRL3 bits 4:2.
 
 ## WiFi commands (slot 0)
 
@@ -77,14 +101,22 @@ follow.
 
 | type | name        | ids   | behavior              |
 | ---: | ----------- | ----- | --------------------- |
-|    1 | SET_WAIT    | 0..30 | `set_wait_func_table` |
-|    2 | SET_NO_WAIT | 0     | no handler, returns 1 |
-|    3 | GET_WAIT    | 0..9  | `get_wait_func_table` |
-|    4 | GET_NO_WAIT | 0     | no handler, returns 1 |
+|    1 | SET_WAIT    | 0..33 | `set_wait_func_table` |
+|    2 | SET_NO_WAIT | 0     | no handler, EOPNOTSUPP |
+|    3 | GET_WAIT    | 0..10 | `get_wait_func_table` |
+|    4 | GET_NO_WAIT | 0     | no handler, EOPNOTSUPP |
 
-- An id past the table prints `Error: exceed max num!` and returns 0.
+- A null/misaligned address or a buffer shorter than 12 bytes returns EINVAL.
+- An id past the table prints `Error: exceed max num!` and returns EOPNOTSUPP.
+- A missing operation callback returns EOPNOTSUPP.
 - A handler that returns 0 prints `wifi_mail_<type>_operation fail !`.
-- An unknown type prints `not support unknow funcType` and returns 1.
+- An unknown type prints `not support unknow funcType` and returns EINVAL.
+
+EN7523 validates the direct DRAM address and its length before reading the
+message. NOWIFI builds accept GET_WAIT_NPU_INFO and GET_WAIT_NPU_VERSION; other
+commands and valid-but-unimplemented operation types return EOPNOTSUPP.
+Invalid operation types return EINVAL. Static-buffer mode returns EOPNOTSUPP
+on EN7523; AN75xx retains its existing raw-buffer registration path.
 
 The interface id is a band on kite and a ring id on eagle. Both families
 share the table shape; each has its own handler set
@@ -100,9 +132,9 @@ share the table shape; each has its own handler set
 |   5 | driver model         |     |   5 | per-station debug counters |
 |   6 | delete station       |     |   6 | DMA address                |
 |   7 | DRAM BA node         |     |   7 | ring size                  |
-|   8 | packet buffer        |     |   8 | MDC lock                   |
-|   9 | no-BA test           |     |   9 | dump mapping               |
-|  10 | flush one            |     |     |                            |
+|   8 | packet buffer        |     |   8 | NPU support map (unsupported) |
+|   9 | no-BA test           |     |   9 | MDC lock address (unsupported) |
+|  10 | flush one            |     |  10 | NPU version |
 |  11 | flush all            |     |     |                            |
 |  12 | force to CPU         |     |     |                            |
 |  13 | PCIe state           |     |     |                            |
@@ -122,7 +154,31 @@ share the table shape; each has its own handler set
 |  27 | inode stop           |     |     |                            |
 |  28 | PCIe swap            |     |     |                            |
 |  29 | rate limit           |     |     |                            |
-|  30 | chip info            |     |     |                            |
+|  30 | HWNAT init (unsupported) | | | |
+|  31 | chip info | | | |
+|  32 | TX buffer check address (unsupported) | | | |
+|  33 | token ID size (unsupported) | | | |
+
+The canonical IDs are in `npu_wlan.h`, matching Linux's
+`airoha_offload.h`. Dispatch tables use designated indices. Commands 30, 32
+and 33 in SET_WAIT and 8 and 9 in GET_WAIT are reserved but have no handler;
+they return EOPNOTSUPP. The old placeholder MDC-lock handler returned success
+without a value, so it is not registered. The old private GET mapping-dump
+command is not part of this ABI.
+
+GET_WAIT_NPU_VERSION (10) works on every build, including NOWIFI. It returns
+one little-endian u32: major in bits 31:16, minor in bits 15:0. Both the boot
+banner and this reply use `NPU_VERSION_MAJOR`/`NPU_VERSION_MINOR`; the current
+value is `0x00070008` (7.8). The full suffix and Git revision remain in the
+banner and debug block. NOWIFI's GET_WAIT_NPU_INFO returns zero and does not
+advertise a WiFi datapath.
+
+The previous firmware table put chip info at SET 30, MDC lock at GET 8,
+and mapping dump at GET 9. Use a matching host and firmware; those
+legacy meanings are not aliases of the current commands. The kernel sends
+newer GETs on v1 too and lets firmware report unsupported commands. Mailbox
+requests are bounded by the host's 256-byte coherent buffer. The envelope is
+little-endian; command payloads keep their command-specific layout.
 
 The eagle bring-up order is in [wifi-eagle.md](wifi-eagle.md#bring-up).
 

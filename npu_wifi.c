@@ -35,12 +35,25 @@ void dbg_cnt_isr(int src)
 	}
 }
 
-#ifdef HAS_WIFI
+int wifi_mail_get_npu_version(u32 *msg)
+{
+	msg[2] = NPU_VERSION_CODE;
+	return NPU_MBOX_SUCCESS;
+}
+
+#ifndef HAS_WIFI
+int wifi_mail_get_npu_info(u32 *msg)
+{
+	msg[2] = 0;
+	return NPU_MBOX_SUCCESS;
+}
+#endif
+
 static int wifi_mail_exceed(u32 *msg, u32 type)
 {
 	npu_printf("Error: exceed max num!interfaceid=%u wifi_mail_data->funcType=%u wifi_mail_data->funcId=%u\n",
 		   msg[0] & 0xF, type, msg[1]);
-	return 0;
+	return NPU_MBOX_EOPNOTSUPP;
 }
 
 static int wifi_mail_call(wifi_mail_fn_t fn, u32 *msg, const char *op)
@@ -48,7 +61,7 @@ static int wifi_mail_call(wifi_mail_fn_t fn, u32 *msg, const char *op)
 	int ret;
 
 	if (!fn)
-		return 1;
+		return NPU_MBOX_EOPNOTSUPP;
 	ret = fn(msg);
 	if (!(u16)ret)
 		npu_printf("wifi_mail_%s_operation fail !\n", op);
@@ -58,19 +71,32 @@ static int wifi_mail_call(wifi_mail_fn_t fn, u32 *msg, const char *op)
 /* MFUNC_WIFI: msg[0] bits 7:4 funcType, bits 3:0 interface; msg[1] funcId */
 int wifi_mail_dispatch(u32 base, u32 cnt)
 {
-	u32 *msg = (u32 *)((base & 0x3FFFFFFF) | NPU_ADDR_MASK);
-	u32 func_type = (msg[0] >> 4) & 0xF;
+	u32 *msg;
+	u32 func_type;
 
-	(void)cnt;
+#ifdef EN7523
+	/* The v1 boot mapping accesses host DRAM directly with D-cache off. */
+	if ((base & 3) || base < 0x80000000 || base >= 0xc0000000 ||
+	    cnt < 12 || cnt > 0xc0000000 - base)
+		return NPU_MBOX_EINVAL;
+	msg = (u32 *)base;
+#else
+	if (!base || (base & 3) || cnt < 12)
+		return NPU_MBOX_EINVAL;
+	msg = (u32 *)((base & 0x3FFFFFFF) | NPU_ADDR_MASK);
+#endif
+	func_type = (msg[0] >> 4) & 0xF;
 #ifdef NPU_MAIL_TRACE
 	if (func_type != 3 || msg[1] != 0)
 		npu_printf("[MAIL]t%d f%d i%d %x %x %x\n", func_type, msg[1],
-			   msg[0] & 0xF, msg[2], msg[3], msg[4]);
+			   msg[0] & 0xF, msg[2], cnt >= 16 ? msg[3] : 0,
+			   cnt >= 20 ? msg[4] : 0);
 #endif
-	NDBG_TRACE(NDBG_WIFI, func_type << 8 | (msg[1] & 0xFF), msg[2], msg[3]);
+	NDBG_TRACE(NDBG_WIFI, func_type << 8 | (msg[1] & 0xFF),
+		   msg[2], cnt >= 16 ? msg[3] : 0);
 	switch (func_type) {
 	case 1:
-		if (msg[1] > 30)
+		if (msg[1] >= WLAN_FUNC_SET_WAIT_MAX)
 			return wifi_mail_exceed(msg, 1);
 		return wifi_mail_call(set_wait_func_table[msg[1]], msg, "set_wait");
 	case 2:
@@ -79,7 +105,7 @@ int wifi_mail_dispatch(u32 base, u32 cnt)
 			return wifi_mail_exceed(msg, 2);
 		return wifi_mail_call(NULL, msg, "set_nowait");
 	case 3:
-		if (msg[1] > 9)
+		if (msg[1] >= WLAN_FUNC_GET_WAIT_MAX)
 			return wifi_mail_exceed(msg, 3);
 		return wifi_mail_call(get_wait_func_table[msg[1]], msg, "get_wait");
 	case 4:
@@ -88,10 +114,9 @@ int wifi_mail_dispatch(u32 base, u32 cnt)
 		return wifi_mail_call(NULL, msg, "get_nowait");
 	default:
 		npu_printf("not support unknow funcType\n");
-		return 1;
+		return NPU_MBOX_EINVAL;
 	}
 }
-#endif /* HAS_WIFI */
 
 #ifdef WIFI_KITE
 /* hand received frames to the host until the debug stop bit */

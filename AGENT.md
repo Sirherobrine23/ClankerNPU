@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Firmware for the RISC-V NPU in Airoha AN7552, AN7581 and AN7583 SoCs.
+Firmware for the RISC-V NPU in Airoha EN7523, AN7552, AN7581 and AN7583 SoCs.
 Start with [README.md](README.md) for the variant matrix and core map,
 then the subsystem page in [docs/](docs/) for the code you touch.
 
@@ -8,7 +8,8 @@ then the subsystem page in [docs/](docs/) for the code you touch.
 
 ```sh
 make SOC=AN7583 WIFI=MT7993     # one variant, output in build/AN7583_MT7993/
-make all-variants               # all 11; run before every commit
+make SOC=EN7523 check disasm     # EN7523 core services, NOWIFI only
+make all-variants               # all 12; run before every commit
 make SOC=... WIFI=... disasm    # build/<variant>/firmware.dis
 ```
 
@@ -19,6 +20,9 @@ make SOC=... WIFI=... disasm    # build/<variant>/firmware.dis
 - `.data` plus `.bss` must stay under `0x7800` bytes (see
   `firmware.map`). The boot log prints `OVER GLB_VAR_SRAM_SIZE`
   otherwise.
+- EN7523 uses `0x1E900000` SRAM-C, a `0x6800` globals limit and fixed
+  DRAM stacks. It uses the SDK mailbox without a private image descriptor
+  or fixed diagnostic pages.
 - SRAM blocks must fit the part: 256 KB on AN7552, 480 KB on AN7581,
   512 KB on AN7583.
 
@@ -45,7 +49,7 @@ one SoC.
   variant's table in `npu_sram.c`.
 - **PLIC registration keeps the first handler.** Registering again only
   enables the source on the calling hart.
-- **Addresses.** Hardware and the host get physical addresses
+- **Addresses (AN75xx).** Hardware and the host get physical addresses
   (`& 0x1FFFFFFF` for SRAM). Addresses from the host are read through
   `(addr & 0x3FFFFFFF) | 0x40000000`.
 - **Rings the chip fills need their cpu index written back**, or the

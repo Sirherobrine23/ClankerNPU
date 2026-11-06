@@ -1,5 +1,5 @@
 /*
- * AN75XX NPU firmware - boot, per-core entry points and trap handling
+ * ClankerNPU firmware - boot, per-core entry points and trap handling
  *
  * crt0.S calls npu_init() and then core_dispatch(). core_dispatch()
  * sends each hart to the loop it owns. Those loops do not return.
@@ -7,6 +7,8 @@
 
 #include "npu_internal.h"
 
+
+#ifndef EN7523
 
 /* ================================================================
  * Chip ID and module detection
@@ -86,6 +88,8 @@ static void npu_reboot(void)
 }
 
 
+#endif /* !EN7523 */
+
 /* ================================================================
  * Per-core main functions
  * ================================================================ */
@@ -122,7 +126,17 @@ static void npu_core_probe(void)
 {
 	u32 en = REG32(CR_CORE_BOOT_CONFIG) & 0xFF, live = 0, c, i;
 
-	for (c = 0; c < 8; c++)
+#ifdef EN7523
+	u32 expected = (1u << MAX_CORE_NUM) - 1;
+
+	/* The v1 host releases one hart every 100 ms. */
+	for (i = 0; i < 500 &&
+	     ((REG32(CR_CORE_BOOT_CONFIG) & expected) != expected ||
+	      REG32(NPU_CSR_PC(MAX_CORE_NUM - 1)) == 0); i++)
+		delay_ms_mcycle(1);
+	en = REG32(CR_CORE_BOOT_CONFIG) & 0xFF;
+#endif
+	for (c = 0; c < NPU_CLUSTER_SLOTS; c++)
 		for (i = 0; i < 4 && !(live & (1u << c)); i++)
 			if (REG32(NPU_CSR_PC(c)) != 0)
 				live |= 1u << c;
@@ -166,6 +180,7 @@ static void npu_core_selftest(u32 hart)
 		   acc == CORE_TEST_SUM ? "ok" : "FAIL", acc, t);
 }
 
+#ifndef EN7523
 #ifdef HAS_TUNNEL
 /* The tunnel offload never returns. On the eight-core part core 7 runs
  * it; the six-core part has no core 7 and gives it to core 0 once the
@@ -367,21 +382,24 @@ static void __attribute__((noinline)) core7_main(void)
 #endif /* MAX_CORE_NUM > 6 */
 
 
+#endif /* EN7523 */
+
 /* ================================================================
  * Core dispatch
  * ================================================================ */
 
 void core_dispatch(int a0, int a1)
 {
+#ifndef EN7523
 	u32 core = get_hartid();
+#endif
 
 	(void)a0;
 	(void)a1;
 
 #ifdef EN7523
-	en7523_core_loop();
-#endif
-
+	npu_dbg_idle();
+#else
 	switch (core) {
 	case 0:
 		core0_main();
@@ -415,6 +433,7 @@ void core_dispatch(int a0, int a1)
 		npu_printf("\nWrong Core ID: %d", core);
 		break;
 	}
+#endif
 }
 
 
@@ -436,15 +455,16 @@ void core_dispatch(int a0, int a1)
 
 TRAP_HOT u32 trap_dispatch(u32 mcause, u32 mepc, u32 *sp, u32 ra)
 {
-#ifdef EN7523
-	return en7523_terminal_trap(mcause, mepc, sp);
-#endif
 	volatile struct ndbg_hart *hp = &ndbg->hart[get_hartid()];
 
 	if (mcause == MCAUSE_MACHINE_EXT_IRQ) {
+#ifdef EN7523
+		plic_handle_irq();
+#else
 		hp->in_isr = 1;
 		call_isr_by_src(REG32(PLIC_CLAIM_REG) - 1);
 		hp->in_isr = 0;
+#endif
 		return mepc;
 	}
 
@@ -458,11 +478,19 @@ TRAP_HOT u32 trap_dispatch(u32 mcause, u32 mepc, u32 *sp, u32 ra)
 	NDBG_TRACE(NDBG_TRAP, mcause & 0xFFFFF, mepc, hp->mtval);
 	hp->in_isr = 0;
 
+#ifdef EN7523
+	/* Faults park the hart after publishing the common trap record. */
+	irq_disable();
+	csr_write(mie, 0);
+	for (;;)
+		__asm__ volatile("nop");
+#else
 	npu_printf("UnKnow Interrupts (mcause:0x%x, RA:0x%x, SP:0x%x, EPC:%x)\n",
 		   mcause, ra, (u32)sp, mepc);
 
 	/* step over the faulting instruction; it may be compressed */
 	return mepc + (((*(volatile u16 *)mepc) & 3) == 3 ? 4 : 2);
+#endif
 }
 
 /* trap_dispatch and every ISR are C and keep s0-s11 themselves */
@@ -555,18 +583,17 @@ TRAP_HOT void __attribute__((naked, aligned(4))) trap_vector(void)
  * ================================================================ */
 
 /* .data + .bss must fit the global-variable window of the NPU SRAM */
+#ifdef EN7523
+#define GLB_VAR_SRAM_SIZE  0x6800
+#else
 #define GLB_VAR_SRAM_SIZE  0x7800
+#endif
 extern char __bss_end[];
 
 void npu_init(void)
 {
 	u32 hart = get_hartid();
 	u32 mib21;
-
-#ifdef EN7523
-	en7523_core_init();
-	return;
-#endif
 
 	/* hart 0 clears sync flag; others wait */
 	if (hart != 0)
@@ -578,6 +605,10 @@ void npu_init(void)
 			delay_ms_mcycle(100);
 		while (core_sync_flag == 0);
 	}
+#ifdef EN7523
+	__asm__ volatile("fence rw, rw" ::: "memory");
+	csr_clear(0x7c0, 0x40);
+#endif
 
 	/* init PLIC for this hart */
 	plic_init();
@@ -586,7 +617,9 @@ void npu_init(void)
 	irq_disable();
 	csr_write(mtvec, (unsigned long)trap_vector);
 	csr_write(mie, 0x800);
+#ifndef EN7523
 	irq_enable();
+#endif
 
 	/* hart 0 conditional block: first-time initialization */
 	if (npu_reset_pending != 0) {
@@ -594,6 +627,7 @@ void npu_init(void)
 		/* MIB21 gates npu_printf and does not survive the reset pulse */
 		mib21 = REG32(NPU_MIB21);
 		sim_mode_flag = REG32(NPU_MIB12);
+#ifndef EN7523
 		REG32(NPU_SCU_RSTCTRL1) = NPU_SCU_RST_ALL;
 		delay_ms_mcycle(1);
 		REG32(NPU_SCU_RSTCTRL1) = 0;
@@ -602,8 +636,12 @@ void npu_init(void)
 		REG32(NPU_THREAD_ENABLE) = 1;
 		delay_ms_mcycle(1);
 		REG32(NPU_MIB0) = ALL_FF;
+#endif
 		boot_uart_init();
 		npu_dbg_init();
+#ifdef EN7523
+		plic_global_init();
+#endif
 		REG32(NPU_MIB21) = mib21;
 		npu_banner();
 		npu_printf("core freq at %d MHz\n", cpu_clock_get());
@@ -613,15 +651,29 @@ void npu_init(void)
 			npu_printf("Error: OVER GLB_VAR_SRAM_SIZE. "
 				   "_data:0x%x, __bss_end:0x%x\n",
 				   NPU_SRAM_BASE, (u32)__bss_end);
+#ifndef EN7523
 		plic_register_isr(22, uart_rx_isr);
+#endif
 		timer_init(0, 1, 10);
 		mailbox_init();
 	}
 
 	/* hart 0 signals others to proceed */
-	if (hart == 0)
+	if (hart == 0) {
+#ifdef EN7523
+		__asm__ volatile("fence rw, rw" ::: "memory");
+#endif
 		core_sync_flag = 1;
+	}
 
+#ifdef EN7523
+	/* Native sources are enabled only after shared setup is published. */
+	plic_register_isr(8 + hart, mbox_isr);
+	if (hart == 2)
+		plic_register_isr(18, timer_isr);
+	csr_set(0x7c0, 0x40);
+	irq_enable();
+#endif
 	npu_core_selftest(hart);
 
 	/* boot signature */

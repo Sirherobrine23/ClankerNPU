@@ -1,0 +1,17 @@
+# Match the EN7523/NOWIFI firmware currently under development.
+# Change the SoC, WiFi and march flags together when editing another variant.
+CompileFlags:
+  Compiler: clang
+  Add:
+    - -xc
+    - --target=riscv32-unknown-elf
+    - -march=rv32im_zicsr_zifencei
+    - -mabi=ilp32
+    - -std=gnu11
+    - -ffreestanding
+    - -fno-builtin
+    - -nostdlib
+    - -DEN7523
+    - -DNOWIFI
+    - '-DNPU_WIFI_NAME="NOWIFI"'
+    - '-DNPU_GIT_REV="clangd"'

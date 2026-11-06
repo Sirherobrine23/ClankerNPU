@@ -1,21 +1,27 @@
-# Clankered Airoha AN75XX NPU Firmware
+# Clankered Airoha NPU Firmware
 
 Bare-metal firmware for the RISC-V network processor (NPU) inside the
-Airoha AN7552, AN7581 and AN7583 SoCs. The NPU is a cluster of RV32IMC
-harts with no OS and no MMU. Each hart runs one polling loop. Together
+Airoha EN7523, AN7552, AN7581 and AN7583 SoCs. The NPU is a cluster of
+RV32IM (EN7523) or RV32IMC (AN75xx) harts with no OS and no MMU. Each hart runs one polling loop. Together
 they offload WiFi forwarding, tunnel header rewrites and GPON upstream
-scheduling from the ARM host.
+scheduling from the ARM host on AN75xx. EN7523 currently provides core
+services and the initial SDK mailbox control transport.
 
 ## Variants
 
 | SoC    | Harts |   SRAM | WiFi chips                           | Extra features           |
 | ------ | ----: | -----: | ------------------------------------ | ------------------------ |
+| EN7523 |     4 | 384 KB | MT7915, MT7916                       | core services only       |
 | AN7552 |     2 | 256 KB | MT7916, MT7991, MT7993               | none                     |
 | AN7581 |     8 | 480 KB | MT7916, MT7992, MT7996               | tunnel offload, TR-471   |
 | AN7583 |     6 | 512 KB | MT7916, MT7992, MT7993, MT7996, none | tunnel offload, GPON DBA |
 
 MT7916 and MT7996 use the **kite** datapath; MT7991, MT7992 and MT7993
 use the **eagle** datapath. Each SoC and WiFi pair is its own image.
+
+EN7523 provides 384 KiB of main SRAM at 0x1e800000 and a separate
+64 KiB data SRAM at 0x1e900000. The data SRAM holds firmware globals,
+including .data and .bss.
 
 ## System overview
 
@@ -98,30 +104,42 @@ Requires `riscv64-unknown-elf-gcc` (tested with GCC 14.2).
 
 ```sh
 make SOC=AN7583 WIFI=MT7993        # one variant
-make all-variants                  # all 11 variants
+make all-variants                  # all 12 variants
+make SOC=EN7523 check disasm       # core services, defaults to NOWIFI
 make SOC=AN7583 WIFI=MT7993 disasm # build/<variant>/firmware.dis
 ```
 
-| variable    | default                | effect                                                                                  |
-| ----------- | ---------------------- | --------------------------------------------------------------------------------------- |
-| `SOC`       | `AN7583`               | `AN7552`, `AN7581`, `AN7583`                                                            |
-| `WIFI`      | `MT7996`               | `MT7916`, `MT7991`, `MT7992`, `MT7993`, `MT7996`, `NOWIFI`                              |
-| `MAILTRACE` | 0                      | 1 logs every WiFi mail from the mailbox ISR                                             |
-| `NPUTX`     | 1                      | 0 stages host tx frames but never writes the WiFi tx ring                               |
-| `NPUDBG`    | 0                      | 1 starts with the WiFi and stats print bits of the [debug block](docs/debug.md) set     |
-| `PROF`      | 0                      | 1 builds the [profiler](docs/debug.md#profiling): section timers and PC sampling        |
-| `CLANKER`   | 0                      | 1 defines `USE_CLANKER_DRIVER`: Special behaviour to be used with Clanker's host driver |
-| `GITREV`    | `git describe`         | hash in the boot `NPU Version` line                                                     |
-| `CROSS`     | `riscv64-unknown-elf-` | toolchain prefix                                                                        |
+| variable    | default                                | effect                                                                                  |
+| ----------- | -------------------------------------- | --------------------------------------------------------------------------------------- |
+| `SOC`       | `AN7583`                               | `EN7523`, `AN7552`, `AN7581`, `AN7583`                                                  |
+| `WIFI`      | `NOWIFI` on EN7523, `MT7996` otherwise | `MT7916`, `MT7991`, `MT7992`, `MT7993`, `MT7996`, `NOWIFI`                              |
+| `MAILTRACE` | 0                                      | 1 logs every WiFi mail from the mailbox ISR                                             |
+| `NPUTX`     | 1                                      | 0 stages host tx frames but never writes the WiFi tx ring                               |
+| `NPUDBG`    | 0                                      | 1 starts with the WiFi and stats print bits of the [debug block](docs/debug.md) set     |
+| `PROF`      | 0                                      | 1 builds the [profiler](docs/debug.md#profiling): section timers and PC sampling        |
+| `CLANKER`   | 0                                      | 1 defines `USE_CLANKER_DRIVER`: Special behaviour to be used with Clanker's host driver |
+| `GITREV`    | `git describe`                         | hash in the boot `NPU Version` line                                                     |
+| `CROSS`     | `riscv64-unknown-elf-`                 | toolchain prefix                                                                        |
 
 Outputs in `build/<SOC>_<WIFI>/`:
 
-| file           | content                                          |
-| -------------- | ------------------------------------------------ |
-| `npu_rv32.bin` | code and rodata, loaded to DRAM at `0x84000000`  |
-| `npu_data.bin` | initialized data, loaded to SRAM at `0x3E900000` |
-| `firmware.elf` | full ELF                                         |
-| `firmware.map` | linker map                                       |
+| file           | content                                                         |
+| -------------- | --------------------------------------------------------------- |
+| `npu_rv32.bin` | code and rodata, loaded to DRAM at `0x84000000`                 |
+| `npu_data.bin` | initialized data, SRAM at `0x1E900000` (EN7523) or `0x3E900000` |
+| `firmware.elf` | full ELF                                                        |
+| `firmware.map` | linker map                                                      |
+
+### clangd
+
+The root `.clangd` configures C sources and headers for EN7523/NOWIFI,
+using RV32IM/Zicsr/Zifencei, the ILP32 ABI and the firmware's freestanding
+environment. It supplies the version-string macros used by the Makefile.
+
+To edit another variant, update the SoC define, WiFi define and
+`NPU_WIFI_NAME` in `.clangd`. AN75xx also needs
+`-march=rv32imc_zicsr_zifencei`. The editor configuration is independent
+of the variant selected by `make SOC=... WIFI=...`.
 
 ## Source layout
 
@@ -195,17 +213,13 @@ Feature flags from `npu_config.h`:
 | [docs/debug.md](docs/debug.md)           | field debug block: layout, commands, traces, troubleshooting flow and FAQ |
 | [docs/errata.md](docs/errata.md)         | vendor firmware defects and how this firmware handles them                |
 
-## EN7523 diagnostic foundation
+## EN7523 core runtime
 
-`make SOC=EN7523 WIFI=DIAG` builds a four-hart NPU v1 boot diagnostic. It is a separate
-platform target and does not implement WiFi or DMA offload yet. See
-[platform/en7523/README.md](platform/en7523/README.md) for the boot contract,
-record layout and limits.
-
-## EN7523 main core runtime
-
-`make SOC=EN7523 WIFI=NOWIFI` now builds the shared core runtime with EN7523
-startup, BSS synchronization and platform hooks. NOWIFI is the EN7523 default;
-WiFi/DMA offload is not ported. The prior standalone diagnostic is available
-with `WIFI=DIAG`. See [platform/en7523/CORE.md](platform/en7523/CORE.md) for
-installation, expected status and limits.
+`make SOC=EN7523 check disasm` builds and checks the four-hart md32rv NPU v1
+runtime. NOWIFI is the default. Startup, traps, mailbox, native interrupts,
+mutexes and timers use the common firmware sources and linker script.
+The firmware uses the SDK mailbox and the ordinary kernel loader.
+TDMA, host-adaptor, WiFi and PPE offload remain unimplemented for EN7523;
+unsupported commands return failure.
+See [docs/en7523/runtime.md](docs/en7523/runtime.md) for installation, host
+tools, memory reservations and hardware-validation limits.

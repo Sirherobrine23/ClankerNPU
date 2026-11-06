@@ -1,0 +1,50 @@
+name: Build NPU
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      disable_debug:
+        type: boolean
+        default: false
+        description: Disable debug build
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Build ${{ matrix.SOC }} - ${{ matrix.WIFI }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - SOC: EN7523
+            WIFI: NOWIFI
+          - SOC: AN7552
+            WIFI: NOWIFI
+          - SOC: AN7581
+            WIFI: NOWIFI
+          - SOC: AN7583
+            WIFI: NOWIFI
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout Code
+
+      - name: Install host dependecies
+        run: |
+          sudo apt update
+          sudo apt install -y python3 gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
+
+      - name: Build
+        run: make SOC=${{ matrix.SOC }} WIFI=${{ matrix.WIFI }} NPUDBG=${{ inputs.disable_debug == true && '0' || '1' }}
+
+      - name: Upload build artifacts
+        uses: https://github.com/christopherHX/gitea-upload-artifact@v4
+        with:
+          name: ${{ matrix.SOC }}-${{ matrix.WIFI }}
+          if-no-files-found: ignore
+          path: build/${{ matrix.SOC }}_${{ matrix.WIFI }}/**/*
