@@ -25,17 +25,17 @@ off  = (id * 4) & mask       mask 0x3C on AN7552/AN7583 (16 mutexes)
   holds a mutex must not call anything that takes the same one, including
   from an ISR on the same hart.
 
-| id | owner |
-|---:|---|
-| 3, 4 | tx token alloc, free |
-| 5, 6 | kite BA tables, 5 GHz / 2.4 GHz |
-| 8, 9 | kite reorder node alloc, free |
-| 10 | eagle packet queue, kite 2.4 GHz node queue |
-| 11 | kite 5 GHz node queue |
-| 12, 13 | rx buffer id alloc, free |
-| 14 | host notify (30 on AN7581) |
-| 15 | printf |
-| 18 | SRAM allocator |
+|     id | owner                                       |
+| -----: | ------------------------------------------- |
+|   3, 4 | tx token alloc, free                        |
+|   5, 6 | kite BA tables, 5 GHz / 2.4 GHz             |
+|   8, 9 | kite reorder node alloc, free               |
+|     10 | eagle packet queue, kite 2.4 GHz node queue |
+|     11 | kite 5 GHz node queue                       |
+| 12, 13 | rx buffer id alloc, free                    |
+|     14 | host notify (30 on AN7581)                  |
+|     15 | printf                                      |
+|     18 | SRAM allocator                              |
 
 ## PLIC
 
@@ -64,16 +64,16 @@ shared.
 Registering a source that already has a handler is how a second hart
 enables it for itself.
 
-| source | handler | hart |
-|---:|---|---|
-| 8 + n | mailbox of core n | core 0 registers all; core 5 enables 13 again for DBA |
-| 15 | mailbox of core 7 | tunnel offload hart |
-| 18 | timer tick | core 2; core 0 on AN7552 |
-| 22 | boot UART rx console | core 0 |
-| 24 / 32 | BME done (AN7552 / others), kite | core 0 |
-| 25 / 33 | BMGR status (AN7552 / others) | core 0 |
-| 59 | debug counter | core 0, not on AN7552 |
-| 95 | PPE WiFi buffer return, eagle | core 0 |
+|  source | handler                          | hart                                                  |
+| ------: | -------------------------------- | ----------------------------------------------------- |
+|   8 + n | mailbox of core n                | core 0 registers all; core 5 enables 13 again for DBA |
+|      15 | mailbox of core 7                | tunnel offload hart                                   |
+|      18 | timer tick                       | core 2; core 0 on AN7552                              |
+|      22 | boot UART rx console             | core 0                                                |
+| 24 / 32 | BME done (AN7552 / others), kite | core 0                                                |
+| 25 / 33 | BMGR status (AN7552 / others)    | core 0                                                |
+|      59 | debug counter                    | core 0, not on AN7552                                 |
+|      95 | PPE WiFi buffer return, eagle    | core 0                                                |
 
 ## Timers
 
@@ -82,10 +82,10 @@ AN7581 has 4 timers, AN7552 8 and AN7583 16 over the two banks. Five
 tables in `npu_globals.c` index them: PLIC source, clear bit, enable bit,
 counter register and reload register.
 
-| SoC | timer clock | reload |
-|---|---|---|
-| AN7583 | 50 MHz | `50000 * period` |
-| AN7552 | CPU clock / 4 | `1000 * period * clk` |
+| SoC    | timer clock   | reload                      |
+| ------ | ------------- | --------------------------- |
+| AN7583 | 50 MHz        | `50000 * period`            |
+| AN7552 | CPU clock / 4 | `1000 * period * clk`       |
 | AN7581 | CPU clock / 4 | `1000 * period * clk / 100` |
 
 `npu_init` starts timer 0 with period 10. Core 2 takes its interrupt
@@ -110,14 +110,14 @@ cycle count would overflow 32 bits. `delay_1ms` is a plain loop.
 
 Measured on AN7552 at 800 MHz, in cycles:
 
-| operation | cycles |
-|---|---:|
-| ALU instruction | 1 |
-| taken branch or jump | 5 |
-| load from SRAM or the D-cached stack | 10 |
-| MMIO register read | 40 |
-| uncached DRAM read (`0x4xxxxxxx`) | 73 |
-| PCIe register read | 1460 |
+| operation                            | cycles |
+| ------------------------------------ | -----: |
+| ALU instruction                      |      1 |
+| taken branch or jump                 |      5 |
+| load from SRAM or the D-cached stack |     10 |
+| MMIO register read                   |     40 |
+| uncached DRAM read (`0x4xxxxxxx`)    |     73 |
+| PCIe register read                   |   1460 |
 
 Stores are posted and cost about one cycle. Back-to-back uncached
 loads do not overlap. Loads dominate: a restored callee-saved register
@@ -140,10 +140,10 @@ interesting results:
 - Two vendor instructions act on one 64-byte D-cache line at the address
   in rs1:
 
-| encoding | effect |
-|---|---|
+| encoding                         | effect                                        |
+| -------------------------------- | --------------------------------------------- |
 | `0xFC0xx073` (imm `0xFC0`, rd 0) | write the line back if dirty, then invalidate |
-| `0xFC2xx073` (imm `0xFC2`, rd 0) | invalidate the line; dirty data is lost |
+| `0xFC2xx073` (imm `0xFC2`, rd 0) | invalidate the line; dirty data is lost       |
 
 The stock eagle firmware issues `0xFC2` once per 64-byte line before it
 reads descriptors the chip wrote through the cached alias: its RRO MSDU
@@ -163,10 +163,10 @@ cost 80 to 95 cycles in a loop.
 
 Two output paths share mutex 15.
 
-| function | UART | prefix | line end |
-|---|---|---|---|
-| `npu_printf` | SoC UART `0x1FBF0000` | `[Cn]`, n = hart | LF then CR |
-| `boot_printf` | boot UART `0x1EC10000` | `[Cn]` always | CR then LF |
+| function      | UART                   | prefix           | line end   |
+| ------------- | ---------------------- | ---------------- | ---------- |
+| `npu_printf`  | SoC UART `0x1FBF0000`  | `[Cn]`, n = hart | LF then CR |
+| `boot_printf` | boot UART `0x1EC10000` | `[Cn]` always    | CR then LF |
 
 `npu_printf` prints nothing while `MIB21` is nonzero, which lets the host
 silence the firmware. It runs with interrupts off and gives up on a

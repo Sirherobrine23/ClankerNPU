@@ -91,12 +91,12 @@ allocator, so no other block may be claimed before it (see
 Core 3 identifies the package from the chip capability table
 (`chip_cap_query`) and powers down ports the package does not have:
 
-| capability bit | missing port | action |
-|---:|---|---|
-| 1 | USB 1 | USB PHY power down, `0x1FB00830 \|= 0x8000` |
-| 2 | USB 2 | USB PHY power down |
-| 3 | PCIe 0 | `0x1FA5B460 = 0` |
-| 4 | PCIe 1 | `0x1FA5C460 = 0` |
+| capability bit | missing port | action                                      |
+| -------------: | ------------ | ------------------------------------------- |
+|              1 | USB 1        | USB PHY power down, `0x1FB00830 \|= 0x8000` |
+|              2 | USB 2        | USB PHY power down                          |
+|              3 | PCIe 0       | `0x1FA5B460 = 0`                            |
+|              4 | PCIe 1       | `0x1FA5C460 = 0`                            |
 
 An unknown chip id prints `unknown chipid, module load fail!` and reboots
 the SoC through `0x1FB00040`.
@@ -127,9 +127,9 @@ holds (see [platform.md](platform.md#hardware-mutex)).
 `cpu_clock_get()` reads the PLL register `0x1FA201FC`. `bits[2:0] + 1` is
 the divider and a 2-bit selector picks the base frequency:
 
-| SoC | selector | base (MHz) |
-|---|---|---|
-| AN7552, AN7581 | `bits[9:8]` | 800, 750, 720, 600 |
-| AN7583 | `bits[10:9]` | 666, 800, 720, 600 |
+| SoC            | selector     | base (MHz)         |
+| -------------- | ------------ | ------------------ |
+| AN7552, AN7581 | `bits[9:8]`  | 800, 750, 720, 600 |
+| AN7583         | `bits[10:9]` | 666, 800, 720, 600 |
 
 With `MIB12` nonzero at boot (simulation), the clock reads 100 MHz.

@@ -79,8 +79,11 @@ en7523_prologue_end:
 	li t0, 4
 	bgeu a0, t0, .Lpark
 
-	/* No stack access until the per-hart memory bank is validated on silicon. */
-	li sp, 0x30003ff0
+	/* Use disjoint reserved DRAM stacks, independent of local SRAM banking. */
+	la sp, __stack_base
+	addi t0, a0, 1
+	slli t0, t0, 12
+	add sp, sp, t0
 	la gp, __global_pointer$
 	la t0, __diag_base
 	slli t1, a0, 6
@@ -110,20 +113,135 @@ en7523_prologue_end:
 	sw zero, 52(t0)
 	sw zero, 56(t0)
 	sw zero, 60(t0)
-	li t1, 1
+	li t1, 3
 	sw t1, 4(t0)
+	/* All shared initialization is complete before entering freestanding C. */
+	mv s4, a0
+	mv s5, t0
+	mv a1, t0
+	call en7523_runtime_init
+	mv t6, a0
+	mv a0, s4
+	mv t0, s5
+	beqz t6, .Lc_ready
+	li t1, 0x45525200
+	or t1, t1, t6
+	sw t1, 52(t0)
+	li t1, 3
+	sw t1, 12(t0)
+	j .Lpublish
+.Lc_ready:
+	li t1, 1
+	sw t1, 12(t0)
+.Lpublish:
 	fence rw, rw
 	li t1, 0x454e5055 /* ENPU */
 	sw t1, 0(t0)
 	fence rw, rw
 
-	/* Polling progress only: no peripheral interrupt, DMA or mailbox setup. */
-	li t1, 0
+	beqz t6, .Lrun
+	j .Lpark
+.Lrun:
+	/* Hart 0 owns queue 0; the other harts only publish progress. */
+	li s0, 0x1ec0c030
+	li s1, 0x840f1000
+	li s2, 0
 .Lheartbeat:
+	lw t1, 16(t0)
 	addi t1, t1, 1
 	sw t1, 16(t0)
 	fence w, w
+	bnez a0, .Lworker_test
+	lw t2, 12(s0)
+	andi t3, t2, 3
+	li t4, 1
+	bne t3, t4, .Lheartbeat
+	fence iorw, iorw
+	li t3, 0x1ec0c000
+	li t4, 1
+	sw t4, 0(t3) /* Clear the queue 0 pending source, not host queue 8. */
+	addi s2, s2, 1
+	sw s2, 48(t0)
+	li s3, 0 /* Transport error until the request has been validated. */
+	srli t3, t2, 11
+	andi t3, t3, 15
+	li t4, 7
+	bne t3, t4, .Lreply
+	andi t3, t2, 32
+	bnez t3, .Lreply
+	lw t3, 0(s0)
+	bne t3, s1, .Lreply
+	lw t3, 4(s0)
+	li t4, 64
+	bne t3, t4, .Lreply
+	lw t3, 0(s1)
+	li t4, 0x4e50444d
+	bne t3, t4, .Lreply
+	lw t3, 4(s1)
+	li t4, 1
+	bne t3, t4, .Lreply
+	lw t3, 12(s1)
+	li t4, 2
+	beq t3, t4, .Lrequest_trap
+	bgeu t3, t4, .Lbad_command
+	j .Lstatus
+.Lrequest_trap:
+	lw t3, 48(s1)
+	beqz t3, .Lbad_command
+	li t4, 4
+	bgeu t3, t4, .Lbad_command
+	slli t3, t3, 6
+	la t4, __diag_base
+	add t3, t3, t4
+	lw t4, 12(t3)
+	li t5, 1
+	bne t4, t5, .Lbad_command
+	li t4, 0x54524150
+	sw t4, 60(t3)
+	fence rw, rw
+.Lstatus:
+	li t3, 0x00010001
+	sw t3, 20(s1) /* Diagnostic protocol version 1.0. */
+	li t3, 4
+	sw t3, 24(s1)
+	la t3, __diag_base
+	li t4, 0
+.Lstates:
+	lw t5, 12(t3)
+	slli t6, t4, 2
+	add t6, s1, t6
+	sw t5, 28(t6)
+	addi t3, t3, 64
+	addi t4, t4, 1
+	li t5, 4
+	bltu t4, t5, .Lstates
+	sw s2, 44(s1)
+	sw zero, 16(s1)
+	li s3, 1
+	j .Lreply
+.Lbad_command:
+	li t3, 1
+	sw t3, 16(s1)
+.Lreply:
+	/* Publish the complete response before asserting transport DONE. */
+	fence iorw, iorw
+	li t3, -31
+	and t2, t2, t3
+	slli s3, s3, 2
+	or t2, t2, s3
+	ori t2, t2, 2
+	sw t2, 12(s0)
+	fence iorw, iorw
 	j .Lheartbeat
+
+.Lworker_test:
+	lw t3, 60(t0)
+	li t4, 0x54524150
+	bne t3, t4, .Lheartbeat
+	sw zero, 60(t0)
+	fence rw, rw
+	ecall /* Intentional M-mode environment call; terminal trap cause 11. */
+	j .Lpark
 
 	.balign 4
 .Ltrap:

@@ -39,13 +39,13 @@ flowchart LR
   C4 -->|"rx rings 16B x1536 x2"| WIFI
 ```
 
-| core | loop | work |
-|---:|---|---|
-| 0 | `ppe_wifi_bufid_isr` (PLIC 95) | frames the PPE did not forward go to the host queue; free-only entries return the buffer, 16 to a hold of mutex 13 with `HAS_ID_BATCH`. With `HAS_HOT_TEXT` it reads the FIFO count again before returning, up to 256 entries |
-| 1 | `eagle_rxdmad_loop` | one rxdmad descriptor at a time: `dst_sel` frames to TDMA tx, the rest to the host queue; chains multi-buffer frames. An empty ring waits 500 delay loops, 20 with `HAS_FAST_POLL` |
-| 2 | `eagle_tx_fast_path` | staged host frames and the TDMA rx ring into the WiFi tx ring, paced by the slots the chip has handed back |
-| 3 | `eagle_core3_loop` | host adaptor in rings to staging, packet queue to host adaptor out rings, tx done ring |
-| 4 | `eagle_rx_refill_loop` | refills both rx rings |
+| core | loop                           | work                                                                                                                                                                                                                          |
+| ---: | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|    0 | `ppe_wifi_bufid_isr` (PLIC 95) | frames the PPE did not forward go to the host queue; free-only entries return the buffer, 16 to a hold of mutex 13 with `HAS_ID_BATCH`. With `HAS_HOT_TEXT` it reads the FIFO count again before returning, up to 256 entries |
+|    1 | `eagle_rxdmad_loop`            | one rxdmad descriptor at a time: `dst_sel` frames to TDMA tx, the rest to the host queue; chains multi-buffer frames. An empty ring waits 500 delay loops, 20 with `HAS_FAST_POLL`                                            |
+|    2 | `eagle_tx_fast_path`           | staged host frames and the TDMA rx ring into the WiFi tx ring, paced by the slots the chip has handed back                                                                                                                    |
+|    3 | `eagle_core3_loop`             | host adaptor in rings to staging, packet queue to host adaptor out rings, tx done ring                                                                                                                                        |
+|    4 | `eagle_rx_refill_loop`         | refills both rx rings                                                                                                                                                                                                         |
 
 Core 2 counts a band's free room from the tx ring itself, not from the
 PCIe DMA index (1460 cycles a read). The chip hands slots back in order
@@ -74,18 +74,18 @@ refills the rx rings. See [AN7552](#an7552).
 
 ## Rings and buffers
 
-| ring | location | entry | filled by |
-|---|---|---:|---|
-| rxdmad (indirect command) | PCIe descriptor block + `0x0E0A0` | 16 B | WiFi chip |
-| rx ring 0, 1 | block + `0x00000`, `0x140A0` | 16 B | core 4 |
-| MSDU page ring | block + `0x0E020` | 16 B | NPU, at ring init |
-| WiFi tx ring 0, 1 | block + `0x06020`, `0x1A0C0` | 16 B | core 2 |
-| tx done | host-given base | 16 B | WiFi chip |
-| host adaptor in 0, 1 | `0x1EC0D0A0`, `0x1EC0D0B0` | 208 B | host |
-| host adaptor out 0, 1 | `0x1EC0D180`, `0x1EC0D190` | 24 B | core 3 |
-| TDMA tx 0, 1 | `0x1FB50800`, `0x1FB50810` | 8 B | core 1 |
-| TDMA rx 0, 1 | `0x1FB50900`, `0x1FB50910` | 32 B | PPE |
-| PPE buffer return | `0x1FB50FDC`..`0x1FB50FE4` | FIFO | PPE |
+| ring                      | location                          | entry | filled by         |
+| ------------------------- | --------------------------------- | ----: | ----------------- |
+| rxdmad (indirect command) | PCIe descriptor block + `0x0E0A0` |  16 B | WiFi chip         |
+| rx ring 0, 1              | block + `0x00000`, `0x140A0`      |  16 B | core 4            |
+| MSDU page ring            | block + `0x0E020`                 |  16 B | NPU, at ring init |
+| WiFi tx ring 0, 1         | block + `0x06020`, `0x1A0C0`      |  16 B | core 2            |
+| tx done                   | host-given base                   |  16 B | WiFi chip         |
+| host adaptor in 0, 1      | `0x1EC0D0A0`, `0x1EC0D0B0`        | 208 B | host              |
+| host adaptor out 0, 1     | `0x1EC0D180`, `0x1EC0D190`        |  24 B | core 3            |
+| TDMA tx 0, 1              | `0x1FB50800`, `0x1FB50810`        |   8 B | core 1            |
+| TDMA rx 0, 1              | `0x1FB50900`, `0x1FB50910`        |  32 B | PPE               |
+| PPE buffer return         | `0x1FB50FDC`..`0x1FB50FE4`        |  FIFO | PPE               |
 
 The PCIe descriptor block is SRAM type 1; see
 [memory.md](memory.md#pcie-descriptor-block).
@@ -147,22 +147,22 @@ The host hands over the rings with WiFi SET_WAIT and GET_WAIT mails
 (see [mailbox.md](mailbox.md#wifi-commands-slot-0)). The interface id in
 the mail header is a ring id.
 
-| ring id | ring |
-|---:|---|
-| 0, 1 | rx rings |
-| 5, 6 | MSDU page ring / WiFi tx rings |
-| 8, 9 | indirect command (rxdmad) ring |
-| 10, 11 | tx done rings |
-| 15 | all bases set |
+| ring id | ring                           |
+| ------: | ------------------------------ |
+|    0, 1 | rx rings                       |
+|    5, 6 | MSDU page ring / WiFi tx rings |
+|    8, 9 | indirect command (rxdmad) ring |
+|  10, 11 | tx done rings                  |
+|      15 | all bases set                  |
 
 Each loop waits for its own set of flags:
 
-| core | starts when |
-|---:|---|
-| 1 | rx and tx enabled (SET_WAIT 24 cases 2 and 7) |
-| 2 | core 0 init done, tx done ring set up (SET_WAIT 1, ring 10), tx on (case 7) |
-| 3 | core 0 init done, RRO state up and tx enabled |
-| 4 | core 0 init done, rx and tx enabled, both rx rings set up (SET_WAIT 1, rings 0 and 1) |
+| core | starts when                                                                           |
+| ---: | ------------------------------------------------------------------------------------- |
+|    1 | rx and tx enabled (SET_WAIT 24 cases 2 and 7)                                         |
+|    2 | core 0 init done, tx done ring set up (SET_WAIT 1, ring 10), tx on (case 7)           |
+|    3 | core 0 init done, RRO state up and tx enabled                                         |
+|    4 | core 0 init done, rx and tx enabled, both rx rings set up (SET_WAIT 1, rings 0 and 1) |
 
 A stop (case 4) clears the flags and every loop idles until they are set
 again.
@@ -170,25 +170,25 @@ again.
 `GET_WAIT 4` answers per ring id with a physical address
 (`& 0x1FFFFFFF`), and the host programs the chip from it:
 
-| id | answer |
-|---:|---|
-| 0, 1 | rx ring base |
+|   id | answer                                                         |
+| ---: | -------------------------------------------------------------- |
+| 0, 1 | rx ring base                                                   |
 | 5, 6 | WiFi tx ring base; sets every descriptor to `0x80000000` first |
-| 8, 9 | rxdmad ring base |
-| 10 | MSDU page ring base |
+| 8, 9 | rxdmad ring base                                               |
+|   10 | MSDU page ring base                                            |
 
 `SET_WAIT 24` (inode tx/rx register) cases:
 
-| case | action |
-|---:|---|
-| 0 | RRO address element table: 128 tables of 64 KB, 8 sessions each |
-| 1 | particular session table |
-| 2 | rx on: TDMA flow control on, rx and tx enabled |
-| 3 | re-arm one session's elements |
-| 4 | stop: TDMA flow control off, every loop pauses |
-| 5 | host register for the rxdmad cpu index |
-| 6 | restart: wait for TDMA idle, rebuild buffer ids and counters |
-| 7 | tx on |
+| case | action                                                          |
+| ---: | --------------------------------------------------------------- |
+|    0 | RRO address element table: 128 tables of 64 KB, 8 sessions each |
+|    1 | particular session table                                        |
+|    2 | rx on: TDMA flow control on, rx and tx enabled                  |
+|    3 | re-arm one session's elements                                   |
+|    4 | stop: TDMA flow control off, every loop pauses                  |
+|    5 | host register for the rxdmad cpu index                          |
+|    6 | restart: wait for TDMA idle, rebuild buffer ids and counters    |
+|    7 | tx on                                                           |
 
 ## PCIe windows
 
@@ -197,17 +197,17 @@ inbound window, a base and an end address, both physical. Until
 `SET_WAIT 14` opens it, the chip can neither fetch a tx descriptor nor
 write an rx one, and its DMA index never moves.
 
-| register | PCIe 0 | PCIe 1 |
-|---|---|---|
-| base | `0x1FA90038` | `0x1FC28030` (`0x1FA90030` on AN7552) |
-| end | `0x1FA9003C` | `0x1FC28034` (`0x1FA90034` on AN7552) |
+| register | PCIe 0       | PCIe 1                                |
+| -------- | ------------ | ------------------------------------- |
+| base     | `0x1FA90038` | `0x1FC28030` (`0x1FA90030` on AN7552) |
+| end      | `0x1FA9003C` | `0x1FC28034` (`0x1FA90034` on AN7552) |
 
-| port type | mapping |
-|---:|---|
-| 0 | PCIe 1 gets the whole block |
-| 1 | PCIe 0 gets the whole block |
-| 2 | band 0 (up to rx ring 1) on PCIe 1, band 1 on PCIe 0 |
-| 3 | band 0 on PCIe 0, band 1 on PCIe 1 |
+| port type | mapping                                              |
+| --------: | ---------------------------------------------------- |
+|         0 | PCIe 1 gets the whole block                          |
+|         1 | PCIe 0 gets the whole block                          |
+|         2 | band 0 (up to rx ring 1) on PCIe 1, band 1 on PCIe 0 |
+|         3 | band 0 on PCIe 0, band 1 on PCIe 1                   |
 
 ## Descriptors
 
@@ -223,11 +223,11 @@ write an rx one, and its DMA index never moves.
 - **CPU index.** Every ring the chip fills needs its cpu index advanced,
   or the chip stalls when it catches up:
 
-  | ring | when | written to |
-  |---|---|---|
-  | rxdmad | every 128 descriptors | ring register + 8, or the host register from case 5 |
-  | rx ring 0, 1 | every 128 refills | ring register + 8 |
-  | tx done | every 16 | ring register + 8 |
+  | ring         | when                  | written to                                          |
+  | ------------ | --------------------- | --------------------------------------------------- |
+  | rxdmad       | every 128 descriptors | ring register + 8, or the host register from case 5 |
+  | rx ring 0, 1 | every 128 refills     | ring register + 8                                   |
+  | tx done      | every 16              | ring register + 8                                   |
 
 ## Traffic directions
 
@@ -279,14 +279,14 @@ drops a TDMA rx frame, re-arming its slot, when:
   than `interval` pass untouched, and frames of `small` bytes or less
   are never dropped this way.
 
-| field of `wifi_sta_q` | default | |
-|---|---:|---|
-| `limit` | 8192 | frames; leaves about 2800 tokens for others |
-| `target` | 0 | frames; off |
-| `interval` | 100 ms | in cycles |
-| `delay` | 10 ms | in cycles |
-| `min_q` | 64 | frames |
-| `small` | 256 | bytes |
+| field of `wifi_sta_q` | default |                                             |
+| --------------------- | ------: | ------------------------------------------- |
+| `limit`               |    8192 | frames; leaves about 2800 tokens for others |
+| `target`              |       0 | frames; off                                 |
+| `interval`            |  100 ms | in cycles                                   |
+| `delay`               |   10 ms | in cycles                                   |
+| `min_q`               |      64 | frames                                      |
+| `small`               |     256 | bytes                                       |
 
 Zero turns a field off. The fields can change at run time; the debug
 block tag `SQLM` gives their address. [sta-qlimit.md](sta-qlimit.md)
@@ -312,11 +312,11 @@ may be dropped: the vendor host driver does not expect that, so default
 builds leave them alone. Core 3 stages host frames, so it finds their
 station in the TXP behind the TXD:
 
-| TXD / TXP form | station |
-|---|---|
-| HIF TXP v1 (vendor default, mt76) | `rept_wds_wcid`, TXP bytes 5-6 |
-| HIF TXP v2/v3 (vendor SW A-MSDU): TXD word 0 version 2 or 3 in bits 22:19, word 1 zero | TXP word 2 bits 27:16 |
-| MAC TXP (TXD word 7 bit 27, AddBA) | none, not limited |
+| TXD / TXP form                                                                         | station                        |
+| -------------------------------------------------------------------------------------- | ------------------------------ |
+| HIF TXP v1 (vendor default, mt76)                                                      | `rept_wds_wcid`, TXP bytes 5-6 |
+| HIF TXP v2/v3 (vendor SW A-MSDU): TXD word 0 version 2 or 3 in bits 22:19, word 1 zero | TXP word 2 bits 27:16          |
+| MAC TXP (TXD word 7 bit 27, AddBA)                                                     | none, not limited              |
 
 Each counter keeps one writer: core 3 counts host frames sent and dropped
 in their own arrays, and the decision uses host sent + LAN sent - done.

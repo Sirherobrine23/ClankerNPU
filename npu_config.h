@@ -21,7 +21,13 @@
  *   NOWIFI                      → no WiFi offload
  */
 
-#if defined(AN7552)
+#if defined(EN7523)
+#define MAX_CORE_NUM    4
+#define NPU_TIMER_NUM   4
+#if !defined(NOWIFI)
+#error "EN7523 WiFi datapath is not ported"
+#endif
+#elif defined(AN7552)
 #define MAX_CORE_NUM    2
 #define NPU_TIMER_NUM   8
 #define AN75XX

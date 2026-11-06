@@ -110,16 +110,16 @@ queue drains fast and is sampled often.
 
 ## Settings
 
-| field | default | unit | effect |
-|---|---:|---|---|
-| `limit` | 8192 | frames | hard cap per station; 0 turns it off |
-| `target` | 0 | frames | standing queue threshold in frames; 0 turns it off |
-| `interval` | 100 ms | cycles | how long a queue must stand; 72000000 at 720 MHz |
-| `limit_drops` | | frames | drops by the hard cap, since boot |
-| `aqm_drops` | | frames | drops against a standing queue, since boot |
-| `delay` | 10 ms | cycles | standing queue threshold in time in the chip; 7200000 at 720 MHz; 0 turns it off |
-| `min_q` | 64 | frames | a station with fewer frames in the chip is never above the delay target |
-| `small` | 256 | bytes | frames this long or shorter are never dropped against a standing queue; 0 drops them too |
+| field         | default | unit   | effect                                                                                   |
+| ------------- | ------: | ------ | ---------------------------------------------------------------------------------------- |
+| `limit`       |    8192 | frames | hard cap per station; 0 turns it off                                                     |
+| `target`      |       0 | frames | standing queue threshold in frames; 0 turns it off                                       |
+| `interval`    |  100 ms | cycles | how long a queue must stand; 72000000 at 720 MHz                                         |
+| `limit_drops` |         | frames | drops by the hard cap, since boot                                                        |
+| `aqm_drops`   |         | frames | drops against a standing queue, since boot                                               |
+| `delay`       |   10 ms | cycles | standing queue threshold in time in the chip; 7200000 at 720 MHz; 0 turns it off         |
+| `min_q`       |      64 | frames | a station with fewer frames in the chip is never above the delay target                  |
+| `small`       |     256 | bytes  | frames this long or shorter are never dropped against a standing queue; 0 drops them too |
 
 The fields are in this order in memory. With `limit`, `target` and
 `delay` all 0 the limit is off and costs one test per frame.
@@ -160,15 +160,15 @@ it waits in the same chip queue as the download, which the host path's
 ping does not. Clients: a 2.4 GHz USB station (2x2, 20 MHz), a WiFi 7
 PC and a WiFi 6 laptop on 5 GHz (160 MHz).
 
-| setting | 2.4 GHz Mbit/s | 2.4 GHz TCP RTT | game p50 / p99 | game loss | PC alone | 2 x 5 GHz total | laptop RTT |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| off | 225 | 226 ms | 139 / 400 ms | 60 % | 1545 | 1460 | 60 ms |
-| frame target 4096 | 226 | 183 ms | 182 / 233 ms | 30 % | 1542 | 1456 | 59 ms |
-| delay 5 ms | 227 | 30 ms | 23 / 63 ms | 3.2 % | 1524 | 1409 | 26 ms |
-| delay 10 ms | 229 | 33 ms | 26 / 60 ms | 5.2 % | 1546 | 1406 | 29 ms |
-| delay 20 ms | 227 | 40 ms | 32 / 65 ms | 4.6 % | 1543 | 1414 | 26 ms |
-| delay 40 ms | 227 | 52 ms | 44 / 97 ms | 3.6 % | 1514 | 1415 | 45 ms |
-| **delay 10 ms, small 256** | 226 | **29 ms** | **22 / 53 ms** | **0 %** | 1510 | 1427 to 1371 | 27 to 29 ms |
+| setting                    | 2.4 GHz Mbit/s | 2.4 GHz TCP RTT | game p50 / p99 | game loss | PC alone | 2 x 5 GHz total |  laptop RTT |
+| -------------------------- | -------------: | --------------: | -------------: | --------: | -------: | --------------: | ----------: |
+| off                        |            225 |          226 ms |   139 / 400 ms |      60 % |     1545 |            1460 |       60 ms |
+| frame target 4096          |            226 |          183 ms |   182 / 233 ms |      30 % |     1542 |            1456 |       59 ms |
+| delay 5 ms                 |            227 |           30 ms |     23 / 63 ms |     3.2 % |     1524 |            1409 |       26 ms |
+| delay 10 ms                |            229 |           33 ms |     26 / 60 ms |     5.2 % |     1546 |            1406 |       29 ms |
+| delay 20 ms                |            227 |           40 ms |     32 / 65 ms |     4.6 % |     1543 |            1414 |       26 ms |
+| delay 40 ms                |            227 |           52 ms |     44 / 97 ms |     3.6 % |     1514 |            1415 |       45 ms |
+| **delay 10 ms, small 256** |            226 |       **29 ms** | **22 / 53 ms** |   **0 %** |     1510 |    1427 to 1371 | 27 to 29 ms |
 
 A second 4-round test of the two 5 GHz clients: off 1456 Mbit/s
 (laptop RTT 53 ms), delay 10 ms small 256 1427 (29 ms), delay 20 ms
@@ -193,14 +193,14 @@ A legacy 802.11a client (the USB station with HT turned off: 54 Mbit/s
 at best, no aggregation, so every frame takes its own channel access)
 on the same 5 GHz radio as the WiFi 7 PC, 3 rounds:
 
-| | off | frame target 4096 | **delay 10 ms** | delay 20 ms |
-|---|---:|---:|---:|---:|
-| slow client alone, Mbit/s | 29.4 | 29.5 | 29.7 | 29.7 |
-| slow client alone, TCP RTT | 497 ms | 499 ms | **38 ms** | 38 ms |
-| slow client alone, retransmits per run | 680 | 690 | 84 | 86 |
-| PC beside the slow client, Mbit/s | 982 | 958 | **1167** | 1199 |
-| slow client beside the PC, Mbit/s | 10.5 | 9.8 | 8.0 | 7.3 |
-| slow client's game flow beside the PC, p50 / loss | 374 ms / 30 % | 377 ms / 33 % | 93 ms / 0 % | 92 ms / 0 % |
+|                                                   |           off | frame target 4096 | **delay 10 ms** | delay 20 ms |
+| ------------------------------------------------- | ------------: | ----------------: | --------------: | ----------: |
+| slow client alone, Mbit/s                         |          29.4 |              29.5 |            29.7 |        29.7 |
+| slow client alone, TCP RTT                        |        497 ms |            499 ms |       **38 ms** |       38 ms |
+| slow client alone, retransmits per run            |           680 |               690 |              84 |          86 |
+| PC beside the slow client, Mbit/s                 |           982 |               958 |        **1167** |        1199 |
+| slow client beside the PC, Mbit/s                 |          10.5 |               9.8 |             8.0 |         7.3 |
+| slow client's game flow beside the PC, p50 / loss | 374 ms / 30 % |     377 ms / 33 % |     93 ms / 0 % | 92 ms / 0 % |
 
 ```mermaid
 xychart-beta
@@ -230,11 +230,11 @@ those, as the client's rate drifted 1.2 to 1.35 Gbit/s between batches.
 
 #### LAN, 4 streams
 
-| target | throughput | vs off | TCP RTT |
-|---|---:|---:|---:|
-| off | 1308 Mbit/s | 100 % | 62.3 ms |
-| 1024 | 1287 Mbit/s | 98.8 % | 22.7 ms |
-| 2048 | 1287 Mbit/s | 98.2 % | 29.5 ms |
+| target   |  throughput |  vs off |     TCP RTT |
+| -------- | ----------: | ------: | ----------: |
+| off      | 1308 Mbit/s |   100 % |     62.3 ms |
+| 1024     | 1287 Mbit/s |  98.8 % |     22.7 ms |
+| 2048     | 1287 Mbit/s |  98.2 % |     29.5 ms |
 | **4096** | 1321 Mbit/s | 101.5 % | **37.2 ms** |
 
 ```mermaid
@@ -250,13 +250,13 @@ throughput 97.5 to 99.9 % of off.
 
 #### +20 ms, 1 stream
 
-| target | throughput | vs off | TCP RTT |
-|---|---:|---:|---:|
-| off | 1195 Mbit/s | 100 % | 71.9 ms |
-| 256 | 927 Mbit/s | 75.0 % | 35.2 ms |
-| 512 | 947 Mbit/s | 76.6 % | 34.5 ms |
-| 1024 | 1026 Mbit/s | 86.1 % | 37.2 ms |
-| 2048 | 1034 Mbit/s | 89.8 % | 44.5 ms |
+| target   |  throughput |  vs off |     TCP RTT |
+| -------- | ----------: | ------: | ----------: |
+| off      | 1195 Mbit/s |   100 % |     71.9 ms |
+| 256      |  927 Mbit/s |  75.0 % |     35.2 ms |
+| 512      |  947 Mbit/s |  76.6 % |     34.5 ms |
+| 1024     | 1026 Mbit/s |  86.1 % |     37.2 ms |
+| 2048     | 1034 Mbit/s |  89.8 % |     44.5 ms |
 | **4096** | 1264 Mbit/s | 105.0 % | **56.2 ms** |
 
 ```mermaid
@@ -286,11 +286,11 @@ latency on the LAN (1024 frames: 6.8 ms, 1205 Mbit/s against 1236 off)
 but tail drop cuts every burst, and at internet RTTs TCP never refills
 the window:
 
-| `limit`, +20 ms | 1 stream | 4 streams | TCP RTT, 1 stream |
-|---|---:|---:|---:|
-| off | 1101 Mbit/s | 1001 Mbit/s | 76.6 ms |
-| 1024 | 360 Mbit/s | 437 Mbit/s | 26.6 ms |
-| 2048 | 556 Mbit/s | 666 Mbit/s | 29.8 ms |
+| `limit`, +20 ms |    1 stream |   4 streams | TCP RTT, 1 stream |
+| --------------- | ----------: | ----------: | ----------------: |
+| off             | 1101 Mbit/s | 1001 Mbit/s |           76.6 ms |
+| 1024            |  360 Mbit/s |  437 Mbit/s |           26.6 ms |
+| 2048            |  556 Mbit/s |  666 Mbit/s |           29.8 ms |
 
 Hence the default cap is far above any standing queue (8192) and the
 standing queue drops do the work.
@@ -311,21 +311,21 @@ runs dry.
 
 ## Pros and cons
 
-| | |
-|---|---|
-| + | A target in time fits every link rate: 30 ms of queue at 2.4 GHz instead of 180 to 230 ms, 38 ms instead of 500 ms for a legacy client, with the same throughput. |
-| + | Game and call packets beside a download wait 20 to 30 ms instead of 140 to 180 ms, and small frames are never dropped early. |
-| + | A slow client no longer holds the channel with a deep queue: a fast client beside it gets up to a fifth more. |
-| + | One station can no longer drain the shared token pool, so host traffic and other stations keep getting tokens. |
-| + | Drops come early and one at a time, not in bursts when the pool is empty: fewer retransmissions. |
-| + | No locks: every count and probe field has one writer. |
-| + | Every value changes at run time, per the table above. |
-| − | Two fast clients on one radio lose up to 2 to 6 % of their sum, and the slower of them gives up share: it meets the delay target first. `delay` 20 ms gives that back for a few ms more queue at 2.4 GHz. |
-| − | One frame per station is timed at a time, so `t` lags a sudden change by up to one trip through the queue. |
-| − | Core 2 spends about 155 cycles more per LAN to WiFi frame with the delay target than with everything off (1194 against 1039, `ELAN` in a `PROF=1` build), 65 more than with the frame target alone. Its ceiling falls from about 690 to 600 kpps, several times what one radio carries. |
-| − | Only wcids below 1024 are tracked; others pass unlimited. |
-| − | Drops only; no ECN marking, and one queue per station, not per flow. A packet marked DSCP EF goes to the chip's voice queue and waits far less (7 ms against 190 ms at 2.4 GHz, measured with no time target); unmarked flows share the station's queue. |
-| − | The upload direction (WiFi to LAN) is not limited, nor are frames the host sends to WiFi unless built with `CLANKER=1`; the host queues those. |
+|     |                                                                                                                                                                                                                                                                                         |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| +   | A target in time fits every link rate: 30 ms of queue at 2.4 GHz instead of 180 to 230 ms, 38 ms instead of 500 ms for a legacy client, with the same throughput.                                                                                                                       |
+| +   | Game and call packets beside a download wait 20 to 30 ms instead of 140 to 180 ms, and small frames are never dropped early.                                                                                                                                                            |
+| +   | A slow client no longer holds the channel with a deep queue: a fast client beside it gets up to a fifth more.                                                                                                                                                                           |
+| +   | One station can no longer drain the shared token pool, so host traffic and other stations keep getting tokens.                                                                                                                                                                          |
+| +   | Drops come early and one at a time, not in bursts when the pool is empty: fewer retransmissions.                                                                                                                                                                                        |
+| +   | No locks: every count and probe field has one writer.                                                                                                                                                                                                                                   |
+| +   | Every value changes at run time, per the table above.                                                                                                                                                                                                                                   |
+| −   | Two fast clients on one radio lose up to 2 to 6 % of their sum, and the slower of them gives up share: it meets the delay target first. `delay` 20 ms gives that back for a few ms more queue at 2.4 GHz.                                                                               |
+| −   | One frame per station is timed at a time, so `t` lags a sudden change by up to one trip through the queue.                                                                                                                                                                              |
+| −   | Core 2 spends about 155 cycles more per LAN to WiFi frame with the delay target than with everything off (1194 against 1039, `ELAN` in a `PROF=1` build), 65 more than with the frame target alone. Its ceiling falls from about 690 to 600 kpps, several times what one radio carries. |
+| −   | Only wcids below 1024 are tracked; others pass unlimited.                                                                                                                                                                                                                               |
+| −   | Drops only; no ECN marking, and one queue per station, not per flow. A packet marked DSCP EF goes to the chip's voice queue and waits far less (7 ms against 190 ms at 2.4 GHz, measured with no time target); unmarked flows share the station's queue.                                |
+| −   | The upload direction (WiFi to LAN) is not limited, nor are frames the host sends to WiFi unless built with `CLANKER=1`; the host queues those.                                                                                                                                          |
 
 ## Where it applies
 

@@ -8,11 +8,11 @@ scheduling from the ARM host.
 
 ## Variants
 
-| SoC | Harts | SRAM | WiFi chips | Extra features |
-|---|---:|---:|---|---|
-| AN7552 | 2 | 256 KB | MT7916, MT7991, MT7993 | none |
-| AN7581 | 8 | 480 KB | MT7916, MT7992, MT7996 | tunnel offload, TR-471 |
-| AN7583 | 6 | 512 KB | MT7916, MT7992, MT7993, MT7996, none | tunnel offload, GPON DBA |
+| SoC    | Harts |   SRAM | WiFi chips                           | Extra features           |
+| ------ | ----: | -----: | ------------------------------------ | ------------------------ |
+| AN7552 |     2 | 256 KB | MT7916, MT7991, MT7993               | none                     |
+| AN7581 |     8 | 480 KB | MT7916, MT7992, MT7996               | tunnel offload, TR-471   |
+| AN7583 |     6 | 512 KB | MT7916, MT7992, MT7993, MT7996, none | tunnel offload, GPON DBA |
 
 MT7916 and MT7996 use the **kite** datapath; MT7991, MT7992 and MT7993
 use the **eagle** datapath. Each SoC and WiFi pair is its own image.
@@ -60,29 +60,29 @@ flowchart LR
 
 Eagle WiFi:
 
-| hart | AN7552 | AN7581 | AN7583 |
-|---:|---|---|---|
-| 0 | init, PPE return ISR; queue drain, rx refill | init | init, PPE return ISR; tunnel offload |
-| 1 | rxdmad ring | rxdmad ring | rxdmad ring |
-| 2 | | timer tick; WiFi tx | timer tick; WiFi tx |
-| 3 | | host adaptor, tx done | host adaptor, tx done |
-| 4 | | rx refill | rx refill |
-| 5 | | idle | GPON DBA |
-| 6 | | idle | |
-| 7 | | tunnel offload, TR-471 | |
+| hart | AN7552                                       | AN7581                 | AN7583                               |
+| ---: | -------------------------------------------- | ---------------------- | ------------------------------------ |
+|    0 | init, PPE return ISR; queue drain, rx refill | init                   | init, PPE return ISR; tunnel offload |
+|    1 | rxdmad ring                                  | rxdmad ring            | rxdmad ring                          |
+|    2 |                                              | timer tick; WiFi tx    | timer tick; WiFi tx                  |
+|    3 |                                              | host adaptor, tx done  | host adaptor, tx done                |
+|    4 |                                              | rx refill              | rx refill                            |
+|    5 |                                              | idle                   | GPON DBA                             |
+|    6 |                                              | idle                   |                                      |
+|    7 |                                              | tunnel offload, TR-471 |                                      |
 
 Kite WiFi:
 
-| hart | AN7552 | AN7581 | AN7583 |
-|---:|---|---|---|
-| 0 | init, timer tick, BME ISR; node rings to host | init | init, BME ISR; tunnel offload |
-| 1 | rx, both bands | rx | rx |
-| 2 | | timer tick; 2.4 GHz rx or classifier | timer tick; 2.4 GHz rx or classifier |
-| 3 | | node rings to host | node rings to host |
-| 4 | | idle | idle |
-| 5 | | idle | GPON DBA |
-| 6 | | idle | |
-| 7 | | tunnel offload, TR-471 | |
+| hart | AN7552                                        | AN7581                               | AN7583                               |
+| ---: | --------------------------------------------- | ------------------------------------ | ------------------------------------ |
+|    0 | init, timer tick, BME ISR; node rings to host | init                                 | init, BME ISR; tunnel offload        |
+|    1 | rx, both bands                                | rx                                   | rx                                   |
+|    2 |                                               | timer tick; 2.4 GHz rx or classifier | timer tick; 2.4 GHz rx or classifier |
+|    3 |                                               | node rings to host                   | node rings to host                   |
+|    4 |                                               | idle                                 | idle                                 |
+|    5 |                                               | idle                                 | GPON DBA                             |
+|    6 |                                               | idle                                 |                                      |
+|    7 |                                               | tunnel offload, TR-471               |                                      |
 
 Harts shown idle, and any hart whose main function returns, serve the
 [debug block](docs/debug.md) commands.
@@ -102,102 +102,110 @@ make all-variants                  # all 11 variants
 make SOC=AN7583 WIFI=MT7993 disasm # build/<variant>/firmware.dis
 ```
 
-| variable | default | effect |
-|---|---|---|
-| `SOC` | `AN7583` | `AN7552`, `AN7581`, `AN7583` |
-| `WIFI` | `MT7996` | `MT7916`, `MT7991`, `MT7992`, `MT7993`, `MT7996`, `NOWIFI` |
-| `MAILTRACE` | 0 | 1 logs every WiFi mail from the mailbox ISR |
-| `NPUTX` | 1 | 0 stages host tx frames but never writes the WiFi tx ring |
-| `NPUDBG` | 0 | 1 starts with the WiFi and stats print bits of the [debug block](docs/debug.md) set |
-| `PROF` | 0 | 1 builds the [profiler](docs/debug.md#profiling): section timers and PC sampling |
-| `CLANKER` | 0 | 1 defines `USE_CLANKER_DRIVER`: Special behaviour to be used with Clanker's host driver |
-| `GITREV` | `git describe` | hash in the boot `NPU Version` line |
-| `CROSS` | `riscv64-unknown-elf-` | toolchain prefix |
+| variable    | default                | effect                                                                                  |
+| ----------- | ---------------------- | --------------------------------------------------------------------------------------- |
+| `SOC`       | `AN7583`               | `AN7552`, `AN7581`, `AN7583`                                                            |
+| `WIFI`      | `MT7996`               | `MT7916`, `MT7991`, `MT7992`, `MT7993`, `MT7996`, `NOWIFI`                              |
+| `MAILTRACE` | 0                      | 1 logs every WiFi mail from the mailbox ISR                                             |
+| `NPUTX`     | 1                      | 0 stages host tx frames but never writes the WiFi tx ring                               |
+| `NPUDBG`    | 0                      | 1 starts with the WiFi and stats print bits of the [debug block](docs/debug.md) set     |
+| `PROF`      | 0                      | 1 builds the [profiler](docs/debug.md#profiling): section timers and PC sampling        |
+| `CLANKER`   | 0                      | 1 defines `USE_CLANKER_DRIVER`: Special behaviour to be used with Clanker's host driver |
+| `GITREV`    | `git describe`         | hash in the boot `NPU Version` line                                                     |
+| `CROSS`     | `riscv64-unknown-elf-` | toolchain prefix                                                                        |
 
 Outputs in `build/<SOC>_<WIFI>/`:
 
-| file | content |
-|---|---|
-| `npu_rv32.bin` | code and rodata, loaded to DRAM at `0x84000000` |
+| file           | content                                          |
+| -------------- | ------------------------------------------------ |
+| `npu_rv32.bin` | code and rodata, loaded to DRAM at `0x84000000`  |
 | `npu_data.bin` | initialized data, loaded to SRAM at `0x3E900000` |
-| `firmware.elf` | full ELF |
-| `firmware.map` | linker map |
+| `firmware.elf` | full ELF                                         |
+| `firmware.map` | linker map                                       |
 
 ## Source layout
 
 One file per subsystem. A file named after a chip family holds only that
 family's code, behind the matching `#ifdef`.
 
-| file | content |
-|---|---|
-| `crt0.S`, `link.ld` | reset vector, stacks, memory layout |
-| `npu_main.c` | per-core entry points, core dispatch, trap handler, `npu_init` |
-| `npu_globals.c` | every shared global; its order is the layout of `npu_data.bin` |
-| `npu_mutex.c`, `npu_plic.c`, `npu_timer.c`, `npu_printf.c` | hardware mutex, interrupts, timers, console |
-| `npu_mbox.c` | mailbox dispatch and host notify |
-| `npu_dbg.c` | field debug block: heartbeats, counters, traces, host commands |
-| `npu_sram.c` | SRAM allocator |
-| `npu_util.c` | memset, memcpy, strlen, integer square root |
-| `npu_bridge.c` | NPU bridge channels |
-| `npu_tunnel.c`, `npu_l4s.c` | tunnel offload, L4S ECN marking |
-| `npu_ppe.c` | chip capability table, PPE setup, HWNAT mail |
-| `npu_tr471.c` | TR-471 init |
-| `npu_dba.c` | GPON DBA |
-| `npu_wifi.c` | WiFi mail dispatch, core 0 and core 3 WiFi init |
-| `npu_wifi_eagle.c`, `npu_wifi_eagle_dp.c` | eagle mail handlers and ring setup, eagle datapath |
-| `npu_wifi_kite.c`, `npu_wifi_init.c` | kite mail handlers, kite setup |
-| `npu_wifi_rx.c`, `npu_wifi_ba.c`, `npu_wifi_fwd.c` | kite rx, BA reorder, host node rings |
-| `npu_wifi_bufid.c` | rx buffer ids, tx tokens, debug counters |
-| `npu_sta_q.c` | per-station limit on frames waiting in the WiFi chip |
-| `npu_tdma.c`, `npu_hostadpt.c` | TDMA, BME, BMGR, DMA copy, host adaptor |
-| `npu_config.h` | variant selection and feature flags |
-| `npu_regs.h`, `npu_types.h` | register addresses, types, CSR access |
-| `npu_internal.h`, `npu_wifi.h` | shared prototypes and externs |
+| file                                                       | content                                                        |
+| ---------------------------------------------------------- | -------------------------------------------------------------- |
+| `crt0.S`, `link.ld`                                        | reset vector, stacks, memory layout                            |
+| `npu_main.c`                                               | per-core entry points, core dispatch, trap handler, `npu_init` |
+| `npu_globals.c`                                            | every shared global; its order is the layout of `npu_data.bin` |
+| `npu_mutex.c`, `npu_plic.c`, `npu_timer.c`, `npu_printf.c` | hardware mutex, interrupts, timers, console                    |
+| `npu_mbox.c`                                               | mailbox dispatch and host notify                               |
+| `npu_dbg.c`                                                | field debug block: heartbeats, counters, traces, host commands |
+| `npu_sram.c`                                               | SRAM allocator                                                 |
+| `npu_util.c`                                               | memset, memcpy, strlen, integer square root                    |
+| `npu_bridge.c`                                             | NPU bridge channels                                            |
+| `npu_tunnel.c`, `npu_l4s.c`                                | tunnel offload, L4S ECN marking                                |
+| `npu_ppe.c`                                                | chip capability table, PPE setup, HWNAT mail                   |
+| `npu_tr471.c`                                              | TR-471 init                                                    |
+| `npu_dba.c`                                                | GPON DBA                                                       |
+| `npu_wifi.c`                                               | WiFi mail dispatch, core 0 and core 3 WiFi init                |
+| `npu_wifi_eagle.c`, `npu_wifi_eagle_dp.c`                  | eagle mail handlers and ring setup, eagle datapath             |
+| `npu_wifi_kite.c`, `npu_wifi_init.c`                       | kite mail handlers, kite setup                                 |
+| `npu_wifi_rx.c`, `npu_wifi_ba.c`, `npu_wifi_fwd.c`         | kite rx, BA reorder, host node rings                           |
+| `npu_wifi_bufid.c`                                         | rx buffer ids, tx tokens, debug counters                       |
+| `npu_sta_q.c`                                              | per-station limit on frames waiting in the WiFi chip           |
+| `npu_tdma.c`, `npu_hostadpt.c`                             | TDMA, BME, BMGR, DMA copy, host adaptor                        |
+| `npu_config.h`                                             | variant selection and feature flags                            |
+| `npu_regs.h`, `npu_types.h`                                | register addresses, types, CSR access                          |
+| `npu_internal.h`, `npu_wifi.h`                             | shared prototypes and externs                                  |
 
 Feature flags from `npu_config.h`:
 
-| flag | set for |
-|---|---|
-| `AN75XX` | every SoC |
-| `AN758X` | AN7581, AN7583 |
-| `WIFI_KITE` | MT7916, MT7996 |
-| `WIFI_EAGLE` | MT7991, MT7992, MT7993 |
-| `HAS_WIFI` | any WiFi chip |
-| `HAS_TUNNEL` | AN7581, AN7583 |
-| `HAS_TR471` | AN7581 with WiFi |
-| `HAS_DBA` | AN7583 with WiFi |
-| `HAS_BME` | AN7552, AN7583 with WiFi (TDMA path) |
-| `HAS_NPU_WIFI_TX` | AN7581 except MT7916, AN7583 eagle (host to NPU tx ring) |
-| `HAS_HOT_TEXT` | AN7552 kite, AN7583 eagle (per-packet code in one `.text.hot` block) |
-| `HAS_ID_BATCH` | AN7583 eagle (rx buffer ids and tx tokens move in batches, one mutex hold each) |
-| `HAS_FAST_POLL` | AN7583 eagle (WiFi rx and tx loops without long idle waits; core 2 serves both bands every pass) |
-| `HAS_ASYNC_COPY` | AN7583 eagle (host out ring copy overlaps the next frame's work) |
-| `HAS_LEAN_TRAP` | AN7583 eagle (trap entry saves only caller-saved registers) |
-| `HAS_EAGLE_SYNC` | AN7552, AN7581 eagle (rx refill marks when an id has left its descriptor; rxdmad and TDMA tx wait briefly for it) |
-| `HAS_EAGLE_STA_QLIMIT` | AN7583 eagle (per-station limit on LAN to WiFi frames in the WiFi chip, by time) |
-| `HAS_CACHED_TXDONE` | AN7583 eagle (tx done reports read through the D-cache after a line invalidate) |
-| `HAS_EAGLE_TX_JUMBO` | AN7581 and AN7583 eagle with NPU tx (host tx frames over 2 KB in reserved pairs of tx buffers) |
+| flag                   | set for                                                                                                           |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `AN75XX`               | every SoC                                                                                                         |
+| `AN758X`               | AN7581, AN7583                                                                                                    |
+| `WIFI_KITE`            | MT7916, MT7996                                                                                                    |
+| `WIFI_EAGLE`           | MT7991, MT7992, MT7993                                                                                            |
+| `HAS_WIFI`             | any WiFi chip                                                                                                     |
+| `HAS_TUNNEL`           | AN7581, AN7583                                                                                                    |
+| `HAS_TR471`            | AN7581 with WiFi                                                                                                  |
+| `HAS_DBA`              | AN7583 with WiFi                                                                                                  |
+| `HAS_BME`              | AN7552, AN7583 with WiFi (TDMA path)                                                                              |
+| `HAS_NPU_WIFI_TX`      | AN7581 except MT7916, AN7583 eagle (host to NPU tx ring)                                                          |
+| `HAS_HOT_TEXT`         | AN7552 kite, AN7583 eagle (per-packet code in one `.text.hot` block)                                              |
+| `HAS_ID_BATCH`         | AN7583 eagle (rx buffer ids and tx tokens move in batches, one mutex hold each)                                   |
+| `HAS_FAST_POLL`        | AN7583 eagle (WiFi rx and tx loops without long idle waits; core 2 serves both bands every pass)                  |
+| `HAS_ASYNC_COPY`       | AN7583 eagle (host out ring copy overlaps the next frame's work)                                                  |
+| `HAS_LEAN_TRAP`        | AN7583 eagle (trap entry saves only caller-saved registers)                                                       |
+| `HAS_EAGLE_SYNC`       | AN7552, AN7581 eagle (rx refill marks when an id has left its descriptor; rxdmad and TDMA tx wait briefly for it) |
+| `HAS_EAGLE_STA_QLIMIT` | AN7583 eagle (per-station limit on LAN to WiFi frames in the WiFi chip, by time)                                  |
+| `HAS_CACHED_TXDONE`    | AN7583 eagle (tx done reports read through the D-cache after a line invalidate)                                   |
+| `HAS_EAGLE_TX_JUMBO`   | AN7581 and AN7583 eagle with NPU tx (host tx frames over 2 KB in reserved pairs of tx buffers)                    |
 
 ## Documentation
 
-| document | covers |
-|---|---|
-| [docs/boot.md](docs/boot.md) | startup, reset sequence, core dispatch, traps, CPU clock |
-| [docs/memory.md](docs/memory.md) | address map, translation, images, SRAM allocator |
-| [docs/platform.md](docs/platform.md) | hardware mutex, PLIC, timers, console |
-| [docs/mailbox.md](docs/mailbox.md) | mailbox, host notify, WiFi, tunnel and HWNAT commands |
-| [docs/dma.md](docs/dma.md) | host adaptor, TDMA, buffer return paths, BMGR |
-| [docs/wifi-eagle.md](docs/wifi-eagle.md) | eagle datapath and ring bring-up |
-| [docs/sta-qlimit.md](docs/sta-qlimit.md) | per-station queue limit: design, settings, measurements |
-| [docs/wifi-kite.md](docs/wifi-kite.md) | kite datapath and BA reorder |
-| [docs/tunnel.md](docs/tunnel.md) | tunnel offload, NPU bridge, L4S, PPE setup |
-| [docs/dba.md](docs/dba.md) | GPON dynamic bandwidth allocation |
-| [docs/debug.md](docs/debug.md) | field debug block: layout, commands, traces, troubleshooting flow and FAQ |
-| [docs/errata.md](docs/errata.md) | vendor firmware defects and how this firmware handles them |
+| document                                 | covers                                                                    |
+| ---------------------------------------- | ------------------------------------------------------------------------- |
+| [docs/boot.md](docs/boot.md)             | startup, reset sequence, core dispatch, traps, CPU clock                  |
+| [docs/memory.md](docs/memory.md)         | address map, translation, images, SRAM allocator                          |
+| [docs/platform.md](docs/platform.md)     | hardware mutex, PLIC, timers, console                                     |
+| [docs/mailbox.md](docs/mailbox.md)       | mailbox, host notify, WiFi, tunnel and HWNAT commands                     |
+| [docs/dma.md](docs/dma.md)               | host adaptor, TDMA, buffer return paths, BMGR                             |
+| [docs/wifi-eagle.md](docs/wifi-eagle.md) | eagle datapath and ring bring-up                                          |
+| [docs/sta-qlimit.md](docs/sta-qlimit.md) | per-station queue limit: design, settings, measurements                   |
+| [docs/wifi-kite.md](docs/wifi-kite.md)   | kite datapath and BA reorder                                              |
+| [docs/tunnel.md](docs/tunnel.md)         | tunnel offload, NPU bridge, L4S, PPE setup                                |
+| [docs/dba.md](docs/dba.md)               | GPON dynamic bandwidth allocation                                         |
+| [docs/debug.md](docs/debug.md)           | field debug block: layout, commands, traces, troubleshooting flow and FAQ |
+| [docs/errata.md](docs/errata.md)         | vendor firmware defects and how this firmware handles them                |
 
 ## EN7523 diagnostic foundation
 
-`make SOC=EN7523` builds a four-hart NPU v1 boot diagnostic. It is a separate
+`make SOC=EN7523 WIFI=DIAG` builds a four-hart NPU v1 boot diagnostic. It is a separate
 platform target and does not implement WiFi or DMA offload yet. See
 [platform/en7523/README.md](platform/en7523/README.md) for the boot contract,
 record layout and limits.
+
+## EN7523 main core runtime
+
+`make SOC=EN7523 WIFI=NOWIFI` now builds the shared core runtime with EN7523
+startup, BSS synchronization and platform hooks. NOWIFI is the EN7523 default;
+WiFi/DMA offload is not ported. The prior standalone diagnostic is available
+with `WIFI=DIAG`. See [platform/en7523/CORE.md](platform/en7523/CORE.md) for
+installation, expected status and limits.

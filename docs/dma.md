@@ -81,13 +81,13 @@ nothing and never set the done bit. Channels in use: 0 host tx frame
 and TXD (core 3), 1 TXD into the WiFi tx ring (core 2), 3 host adaptor
 out ring (core 3). Measured on AN7583:
 
-| copy | cycles |
-|---|---:|
-| 64 bytes | 280 |
-| 256 bytes | 906 |
-| 1500 bytes | 4760 (about 3.2 per byte, 250 MB/s) |
-| 1500 bytes, destination 2 bytes off | about 5200 |
-| two 1500-byte copies on two channels at once | 9500 |
+| copy                                         |                              cycles |
+| -------------------------------------------- | ----------------------------------: |
+| 64 bytes                                     |                                 280 |
+| 256 bytes                                    |                                 906 |
+| 1500 bytes                                   | 4760 (about 3.2 per byte, 250 MB/s) |
+| 1500 bytes, destination 2 bytes off          |                          about 5200 |
+| two 1500-byte copies on two channels at once |                                9500 |
 
 All channels share one engine: parallel copies take as long as the
 same copies in a row, and splitting one copy over two channels is
@@ -133,10 +133,10 @@ and `0x1FB501BC = 0x00EB00EA`; elsewhere `TDMA_FC_CFG2 = 3`.
 
 `TDMA_WIFI_BUF_CFG` (`0x1FB50FE8`) depends on the WiFi family:
 
-| WiFi | write |
-|---|---|
+| WiFi  | write                          |
+| ----- | ------------------------------ |
 | eagle | `(x & 0xFFB300FF) \| 0x190100` |
-| kite | `(x & 0xFFF300FF) \| 0x590100` |
+| kite  | `(x & 0xFFF300FF) \| 0x590100` |
 
 ### TDMA rx, wired to WiFi
 

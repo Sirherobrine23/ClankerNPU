@@ -378,6 +378,10 @@ void core_dispatch(int a0, int a1)
 	(void)a0;
 	(void)a1;
 
+#ifdef EN7523
+	en7523_core_loop();
+#endif
+
 	switch (core) {
 	case 0:
 		core0_main();
@@ -432,6 +436,9 @@ void core_dispatch(int a0, int a1)
 
 TRAP_HOT u32 trap_dispatch(u32 mcause, u32 mepc, u32 *sp, u32 ra)
 {
+#ifdef EN7523
+	return en7523_terminal_trap(mcause, mepc, sp);
+#endif
 	volatile struct ndbg_hart *hp = &ndbg->hart[get_hartid()];
 
 	if (mcause == MCAUSE_MACHINE_EXT_IRQ) {
@@ -555,6 +562,11 @@ void npu_init(void)
 {
 	u32 hart = get_hartid();
 	u32 mib21;
+
+#ifdef EN7523
+	en7523_core_init();
+	return;
+#endif
 
 	/* hart 0 clears sync flag; others wait */
 	if (hart != 0)

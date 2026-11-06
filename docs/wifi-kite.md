@@ -26,13 +26,13 @@ flowchart LR
   C3 -->|"out ring"| HOST["host"]
 ```
 
-| core | work |
-|---:|---|
-| 0 | init, then the BME ISR |
-| 1 | 5 GHz rx ring; 2.4 GHz too when the driver model is DBDC |
-| 2 | timer tick; 2.4 GHz rx when the driver model is 0; in pipeline mode, classifies 5 GHz frames for core 1 |
-| 3 | drains the piNode and rxNode rings of both bands to the host |
-| 4 | nothing |
+| core | work                                                                                                    |
+| ---: | ------------------------------------------------------------------------------------------------------- |
+|    0 | init, then the BME ISR                                                                                  |
+|    1 | 5 GHz rx ring; 2.4 GHz too when the driver model is DBDC                                                |
+|    2 | timer tick; 2.4 GHz rx when the driver model is 0; in pipeline mode, classifies 5 GHz frames for core 1 |
+|    3 | drains the piNode and rxNode rings of both bands to the host                                            |
+|    4 | nothing                                                                                                 |
 
 Core 2's 2.4 GHz rx loop polls the [debug block](debug.md) on every
 pass, so its `KRX2` heartbeat moves and it serves debug commands while
@@ -135,10 +135,10 @@ the fast path; a frame costs about 1660 cycles, down from 2520.
 
 `pkt_forward` queues a frame for the host:
 
-| ring | size | entry | holds |
-|---|---:|---:|---|
-| piNode 2.4 GHz / 5 GHz | 256 / 512 | 16 B | whole frames, with wcid, A-MSDU and rx info |
-| rxNode per band | 128 | 12 B | one segment of a longer frame |
+| ring                   |      size | entry | holds                                       |
+| ---------------------- | --------: | ----: | ------------------------------------------- |
+| piNode 2.4 GHz / 5 GHz | 256 / 512 |  16 B | whole frames, with wcid, A-MSDU and rx info |
+| rxNode per band        |       128 |  12 B | one segment of a longer frame               |
 
 Cores 1 and 2 both fill the piNode rings, so the write takes a hardware
 mutex. Core 3 drains each ring into the host adaptor out ring and frees

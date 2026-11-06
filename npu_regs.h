@@ -10,7 +10,11 @@
 #define CHIP_VARIANT_REG        0x1FB00284
 
 /* NPU cluster (boot control), eight core slots on every part */
+#ifdef EN7523
+#define NPU_CLUSTER_BASE        0x1EC08000
+#else
 #define NPU_CLUSTER_BASE        0x1EC06000
+#endif
 #define CR_CORE_BOOT_TRIGGER    (NPU_CLUSTER_BASE + 0x000)
 #define CR_CORE_BOOT_CONFIG     (NPU_CLUSTER_BASE + 0x004)
 #define CR_CORE_BOOT_BASE(n)    (NPU_CLUSTER_BASE + 0x020 + ((n) << 2))
@@ -30,7 +34,11 @@
 #define NPU_MIB31               NPU_MIB(31)
 
 /* NPU debug CSR, live PC/SP/RA per core slot; 0 while it never fetched */
+#ifdef EN7523
+#define NPU_DEBUG_BASE          0x1EC08800
+#else
 #define NPU_DEBUG_BASE          0x1EC05000
+#endif
 #define NPU_CSR_PC(core)        (NPU_DEBUG_BASE + ((core) * 0x100) + 0x00)
 #define NPU_CSR_SP(core)        (NPU_DEBUG_BASE + ((core) * 0x100) + 0x04)
 #define NPU_CSR_RA(core)        (NPU_DEBUG_BASE + ((core) * 0x100) + 0x08)
@@ -231,7 +239,11 @@
 #define NPU_BRIDGE_DBG_BASE     0x1EC12290
 
 /* NPU SRAM (seen from NPU side) */
+#ifdef EN7523
+#define NPU_SRAM_BASE           0x1E900000
+#else
 #define NPU_SRAM_BASE           0x3E900000
+#endif
 #define NPU_SRAM_SIZE_64K       0x10000
 
 /* DRAM image base */
@@ -248,7 +260,9 @@
 #define STACK_SIZE              0x4000
 
 /* Core counts */
-#if defined(AN7552)
+#if defined(EN7523)
+#define MAX_CORE_NUM            4
+#elif defined(AN7552)
 #define MAX_CORE_NUM            2
 #elif defined(AN7583)
 #define MAX_CORE_NUM            6

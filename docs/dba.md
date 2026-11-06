@@ -9,13 +9,13 @@ reports and writes the next bandwidth map. The code is in `npu_dba.c`.
 Base `0x1FBE4000`. Every FTTR read or write is followed by a dummy read
 of `0x1FB00020`.
 
-| offset | register |
-|---|---|
-| `0x008`, `0x00C` | bandwidth map entry, word 0 then word 1 |
-| `0x010` | map control: bit 0 bank in use, bit 1 bank requested, bit 2 empty map |
-| `0x408` | frame interrupt status, bits 1:0 |
-| `0x418` | T-CONT map mode |
-| `0x498`..`0x4AC` | report ring: write index, base, read index, count, config, size |
+| offset           | register                                                              |
+| ---------------- | --------------------------------------------------------------------- |
+| `0x008`, `0x00C` | bandwidth map entry, word 0 then word 1                               |
+| `0x010`          | map control: bit 0 bank in use, bit 1 bank requested, bit 2 empty map |
+| `0x408`          | frame interrupt status, bits 1:0                                      |
+| `0x418`          | T-CONT map mode                                                       |
+| `0x498`..`0x4AC` | report ring: write index, base, read index, count, config, size       |
 
 A map entry is two words:
 
@@ -75,21 +75,21 @@ flowchart TD
 ONU and T-CONT:
 
 | mode | ONUs | T-CONTs per ONU |
-|---:|---:|---:|
-| 0 | 32 | 4 |
-| 1 | 16 | 8 |
-| 2 | 8 | 16 |
-| 3 | 64 | 2 |
+| ---: | ---: | --------------: |
+|    0 |   32 |               4 |
+|    1 |   16 |               8 |
+|    2 |    8 |              16 |
+|    3 |   64 |               2 |
 
 The default table gives T-CONT 0 of every ONU a fixed grant of 90 and
 every other T-CONT best effort with a maximum of 19340.
 
-| DBA type | grant |
-|---:|---|
-| 1 | fixed bandwidth |
-| 2 | assured bandwidth, adapted |
-| 3, 5 | assured plus a share of what is left |
-| 4 | best effort, a share of what is left |
+| DBA type | grant                                |
+| -------: | ------------------------------------ |
+|        1 | fixed bandwidth                      |
+|        2 | assured bandwidth, adapted           |
+|     3, 5 | assured plus a share of what is left |
+|        4 | best effort, a share of what is left |
 
 ## Reports
 
@@ -125,25 +125,25 @@ frames.
 
 Mailbox slot 3 on core 5. Function type 1 (SET_WAIT) or 3 (GET_WAIT).
 
-| id | command |
-|---:|---|
-| 0 | dump the reports once, 8000 frames later |
-| 1 | print the non-idle counts once, 8000 frames later |
-| 2 | clear non-idle counts |
-| 3 | enable the report drain and the grant step |
-| 4 | ONU state; 0 invalidates all its T-CONTs |
-| 5 | ONU upstream FEC |
-| 6 | T-CONT grant: alloc id, type, fixed, assured, max |
-| 7 | T-CONT valid |
-| 8 | print a T-CONT |
-| 10 | test map 1, 2 or 3 |
-| 11, 13 | write an FTTR register |
-| 12, 14 | read an FTTR register |
-| 15 | T-CONT map mode |
-| 16 | OLT mode: burst overhead 75, else 46 |
-| 17 | all bandwidth to a single ONU |
-| 18 | new DBA enable |
-| 19 | clear an ONU's burst count |
-| 20 | read an ONU's burst count |
+|     id | command                                           |
+| -----: | ------------------------------------------------- |
+|      0 | dump the reports once, 8000 frames later          |
+|      1 | print the non-idle counts once, 8000 frames later |
+|      2 | clear non-idle counts                             |
+|      3 | enable the report drain and the grant step        |
+|      4 | ONU state; 0 invalidates all its T-CONTs          |
+|      5 | ONU upstream FEC                                  |
+|      6 | T-CONT grant: alloc id, type, fixed, assured, max |
+|      7 | T-CONT valid                                      |
+|      8 | print a T-CONT                                    |
+|     10 | test map 1, 2 or 3                                |
+| 11, 13 | write an FTTR register                            |
+| 12, 14 | read an FTTR register                             |
+|     15 | T-CONT map mode                                   |
+|     16 | OLT mode: burst overhead 75, else 46              |
+|     17 | all bandwidth to a single ONU                     |
+|     18 | new DBA enable                                    |
+|     19 | clear an ONU's burst count                        |
+|     20 | read an ONU's burst count                         |
 
 Every mail returns 1.

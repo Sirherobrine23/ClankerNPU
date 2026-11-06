@@ -56,6 +56,13 @@ void mbox_isr(int src)
 	}
 
 	func_idx = (rptr >> 11) & 0xF;
+#ifdef EN7523
+	/* This core-only image never accepts vendor offload or notify requests. */
+	if (func_idx != 7 || (rptr & 0x21) != 1) {
+		REG32(MBQ_CTRL3(mbox_idx)) = (rptr & ~0x1Cu) | 2;
+		return;
+	}
+#endif
 
 	if (rptr & 0x20) {
 		/* raw data path: store base_ptr and max_cnt */
@@ -80,6 +87,9 @@ void mbox_isr(int src)
 		NDBG_TRACE(NDBG_MBOX, mbox_idx << 8 | func_idx, base_ptr, ret);
 
 		/* blocking: set done; else return result via queue 8 */
+#ifdef EN7523
+		__asm__ volatile("fence iorw, iorw" ::: "memory");
+#endif
 		if (rptr & 1)
 			REG32(MBQ_CTRL3(mbox_idx)) = (rptr | 2) & 0xFFFF;
 		else
@@ -92,6 +102,8 @@ void mailbox_init(void)
 	u32 i;
 	u32 *callbacks;
 
+
+#ifndef EN7523
 	/* route mailbox n to core n-1 */
 	for (i = 0; i < MAX_CORE_NUM; i++) {
 		REG32(MBOX_INT_MASK(i + 1)) = (1u << i);
@@ -106,6 +118,8 @@ void mailbox_init(void)
 #endif
 	mbox_notify_mutex[1] = 0;
 
+
+#endif
 	/* zero all dispatch tables */
 	for (i = 0; i < MAX_CORE_NUM; i++)
 		npu_memset(mbox_dispatch[i], 0, 80);
@@ -115,7 +129,11 @@ void mailbox_init(void)
 #ifdef HAS_WIFI
 	callbacks[0] = (u32)(void *)wifi_mail_dispatch;
 #endif
+#ifdef EN7523
+	callbacks[7] = (u32)(void *)en7523_diag_mail;
+#else
 	callbacks[1] = (u32)(void *)tunnel_mail_dispatch;
+#endif
 
 #ifdef HAS_TR471
 #ifdef WIFI_KITE

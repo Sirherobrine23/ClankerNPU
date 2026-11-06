@@ -4,10 +4,10 @@ AN7581 and AN7583 (`HAS_TUNNEL`). Packets that need a header rewrite
 arrive on an NPU bridge channel. The NPU rewrites them and sends them
 back out through the bridge.
 
-| SoC | tunnel hart | bridge channel it serves |
-|---|---:|---:|
-| AN7581 | 7 | 7 |
-| AN7583 | 0, after WiFi init | 0 |
+| SoC    |        tunnel hart | bridge channel it serves |
+| ------ | -----------------: | -----------------------: |
+| AN7581 |                  7 |                        7 |
+| AN7583 | 0, after WiFi init |                        0 |
 
 The same hart also runs L4S ECN marking on channels 1 and 2, and on
 AN7581 the TR-471 init.
@@ -35,12 +35,12 @@ AN7552 has 2 channels, AN7583 4, AN7581 8.
 
 Per channel `ch`:
 
-| register | use |
-|---|---|
-| `0x1EC12050 + ch*4` | bits 7:0 packets waiting, bits 15:8 egress credits |
-| `0x1EC12080 + ch*16` | physical address of the next ingress descriptor |
+| register             | use                                                |
+| -------------------- | -------------------------------------------------- |
+| `0x1EC12050 + ch*4`  | bits 7:0 packets waiting, bits 15:8 egress credits |
+| `0x1EC12080 + ch*16` | physical address of the next ingress descriptor    |
 | `0x1EC12100 + ch*32` | egress words: w0 at +0 is written last and commits |
-| `0x1EC12290`.. | debug counters, reset by writing `0x1EC12370` |
+| `0x1EC12290`..       | debug counters, reset by writing `0x1EC12370`      |
 
 An egress segment is seven words:
 
@@ -73,14 +73,14 @@ flowchart TD
 
 The ingress descriptor sits 32 bytes before the packet:
 
-| field | meaning |
-|---|---|
-| word 0 bits 15:0 | packet length |
-| word 0 bits 26:20 | offset of the IP header |
-| word 0 bit 27, 28 | IPv4, IPv6 |
+| field             | meaning                               |
+| ----------------- | ------------------------------------- |
+| word 0 bits 15:0  | packet length                         |
+| word 0 bits 26:20 | offset of the IP header               |
+| word 0 bit 27, 28 | IPv4, IPv6                            |
 | word 1 bits 30:28 | 1 fragment, 2 reassemble, else tunnel |
-| halfword 9 | fragmentation MTU |
-| byte 20 | UDF, selects the tunnel operation |
+| halfword 9        | fragmentation MTU                     |
+| byte 20           | UDF, selects the tunnel operation     |
 
 On every rewritten packet the NPU sets the egress fields
 `desc[0] = channel << 4`, `desc[4] = udf << 14 | 0x3800`,
@@ -88,11 +88,11 @@ On every rewritten packet the NPU sets the egress fields
 
 ## Operations
 
-| UDF | operation |
-|---|---|
-| 1..20 | VXLAN encapsulation with header template `udf - 1` |
-| 21..40 | VXLAN decapsulation, strips the outer 50 bytes |
-| 41..48 | SRv6 encapsulation with SRv6 template `udf - 41` |
+| UDF    | operation                                                          |
+| ------ | ------------------------------------------------------------------ |
+| 1..20  | VXLAN encapsulation with header template `udf - 1`                 |
+| 21..40 | VXLAN decapsulation, strips the outer 50 bytes                     |
+| 41..48 | SRv6 encapsulation with SRv6 template `udf - 41`                   |
 | 49..56 | SRv6 endpoint: decapsulate, next segment, or last segment with PSP |
 | 65..68 | address mapping: IPv4 and IPv6 header swaps from the mapping table |
 

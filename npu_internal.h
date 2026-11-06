@@ -4,6 +4,13 @@
 #include "npu_config.h"
 #include "npu_types.h"
 #include "npu_regs.h"
+#ifdef EN7523
+void trap_vector(void);
+void en7523_core_init(void);
+void en7523_core_loop(void) __attribute__((noreturn));
+int en7523_diag_mail(u32 base, u32 size);
+u32 en7523_terminal_trap(u32 cause, u32 pc, u32 *sp);
+#endif
 
 /* per-packet code: one contiguous block stays inside the 8 KB
  * instruction cache (HAS_HOT_TEXT) */
@@ -761,7 +768,9 @@ extern volatile u32 kite_test_active;
  * ================================================================ */
 
 /* AN7552 cluster local SRAM is 16 KB: the block takes its last 4 KB */
-#ifdef AN7552
+#ifdef EN7523
+#define NDBG_BASE	0x1E906800
+#elif defined(AN7552)
 #define NDBG_BASE	0x3E903000
 #else
 #define NDBG_BASE	0x3E906800

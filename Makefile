@@ -8,7 +8,7 @@ SIZE    := $(CROSS)size
 # SoC: AN7552, AN7581, AN7583
 SOC     ?= AN7583
 # WiFi: MT7916, MT7991, MT7992, MT7993, MT7996, NOWIFI
-WIFI    ?= MT7996
+WIFI    ?= $(if $(filter EN7523,$(SOC)),NOWIFI,MT7996)
 # 1 logs every WiFi mailbox command, from inside the mailbox ISR
 MAILTRACE ?= 0
 # 0 stages host tx frames but never writes the WiFi tx ring
@@ -23,14 +23,26 @@ CLANKER ?= 0
 GITREV ?= $(shell git describe --always --dirty --abbrev=7 2>/dev/null || echo nogit)
 
 # EN7523 starts as an independent, DMA-free diagnostic target.
-ifeq ($(SOC),EN7523)
+ifeq ($(SOC)_$(WIFI),EN7523_DIAG)
 .DEFAULT_GOAL := all
 .PHONY: all clean disasm check
 all clean disasm check:
 	$(MAKE) -C platform/en7523 $@ CROSS=$(CROSS) \
 		BUILD=$(abspath build/EN7523_DIAG) REFERENCE="$(REFERENCE)"
 else
-ARCH    := -march=rv32imc_zicsr_zifencei -mabi=ilp32
+ifeq ($(SOC),EN7523)
+ifneq ($(WIFI),NOWIFI)
+$(error EN7523 currently supports NOWIFI or DIAG; WiFi DMA is not ported)
+endif
+ARCH := -march=rv32im_zicsr_zifencei -mabi=ilp32
+LINK_SCRIPT := platform/en7523/core.ld
+SRCS_BOOT := platform/en7523/core-start.S
+EXTRA_C := platform/en7523/core.c
+else
+ARCH := -march=rv32imc_zicsr_zifencei -mabi=ilp32
+LINK_SCRIPT := link.ld
+SRCS_BOOT := crt0.S
+endif
 CFLAGS  := $(ARCH) -Os -ffunction-sections -fdata-sections \
            -fno-builtin -ffreestanding -nostdlib \
            -Wall -Wno-unused-function \
@@ -42,7 +54,7 @@ CFLAGS  := $(ARCH) -Os -ffunction-sections -fdata-sections \
            $(if $(filter 1,$(CLANKER)),-DUSE_CLANKER_DRIVER)
 ASFLAGS := $(ARCH) -D$(SOC) -D$(WIFI)
 LIBGCC  := $(shell $(CC) $(ARCH) -print-libgcc-file-name)
-LDFLAGS := -m elf32lriscv -T link.ld -nostdlib --gc-sections --relax \
+LDFLAGS := -m elf32lriscv -T $(LINK_SCRIPT) -nostdlib --gc-sections --relax \
            --print-memory-usage
 
 BUILD   := build/$(SOC)_$(WIFI)
@@ -52,7 +64,7 @@ DATA    := $(BUILD)/npu_data.bin
 MAP     := $(BUILD)/firmware.map
 DIS     := $(BUILD)/firmware.dis
 
-SRCS_S  := crt0.S
+SRCS_S  := $(SRCS_BOOT)
 # npu_globals.c must stay first: it is the only source of .data, so its
 # order fixes the layout of npu_data.bin.
 SRCS_C  := npu_globals.c \
@@ -64,11 +76,12 @@ SRCS_C  := npu_globals.c \
            npu_wifi_kite.c npu_wifi_eagle.c npu_wifi_eagle_dp.c \
            npu_tdma.c npu_hostadpt.c npu_sta_q.c \
            npu_tunnel.c npu_ppe.c npu_l4s.c
+SRCS_C += $(EXTRA_C)
 OBJS    := $(patsubst %.S,$(BUILD)/%.o,$(SRCS_S)) \
            $(patsubst %.c,$(BUILD)/%.o,$(SRCS_C))
 FLAGS   := $(BUILD)/.flags
 
-.PHONY: all clean disasm
+.PHONY: all clean disasm check
 
 all: $(BIN) $(DATA)
 
@@ -81,13 +94,15 @@ $(BUILD)/.flags: FORCE | $(BUILD)
 FORCE:
 
 $(BUILD)/%.o: %.S npu_config.h $(FLAGS) | $(BUILD)
-	$(CC) $(ASFLAGS) -c -o $@ $<
+	@mkdir -p $(dir $@)
+	$(CC) $(ASFLAGS) $(if $(filter EN7523,$(SOC)),-I.) -c -o $@ $<
 
 $(BUILD)/%.o: %.c npu_config.h npu_regs.h npu_types.h npu_internal.h \
 		 npu_wifi.h $(FLAGS) | $(BUILD)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(if $(filter EN7523,$(SOC)),-I.) -c -o $@ $<
 
-$(ELF): $(OBJS) link.ld
+$(ELF): $(OBJS) $(LINK_SCRIPT)
 	$(LD) $(LDFLAGS) -Map=$(MAP) -o $@ $(OBJS) $(LIBGCC)
 
 $(BIN): $(ELF)
@@ -98,6 +113,11 @@ $(DATA): $(ELF)
 
 disasm: $(ELF)
 	$(OBJDUMP) -d -M no-aliases $< > $(DIS)
+
+ifeq ($(SOC),EN7523)
+check: all
+	python3 platform/en7523/test-core.py $(BUILD)
+endif
 
 clean:
 	rm -rf build/

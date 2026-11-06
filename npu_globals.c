@@ -19,11 +19,14 @@
 
 /* 0x000: system config base */
 u32 npu_max_frame_size = 1500;
+#ifdef EN7523
+volatile u32 en7523_core_data_magic = 0x434f5245;
+#endif
 
 /* 0x010 - 0x14C: five per-timer tables. AN7583 has a second bank of 8
  * timers at 0x1EC10200; AN7581 exposes only 4. */
 u32 timer_irq_map[NPU_TIMER_NUM] = {
-#if defined(AN7581)
+#if defined(AN7581) || defined(EN7523)
 	18, 19, 20, 21
 #elif defined(AN7552)
 	18, 19, 20, 52, 53, 54, 55, 21
@@ -32,7 +35,7 @@ u32 timer_irq_map[NPU_TIMER_NUM] = {
 #endif
 };
 u32 timer_clr_bit[NPU_TIMER_NUM] = {
-#if defined(AN7581)
+#if defined(AN7581) || defined(EN7523)
 	16, 17, 18, 21
 #elif defined(AN7552)
 	16, 17, 18, 21, 22, 23, 24, 19
@@ -41,7 +44,7 @@ u32 timer_clr_bit[NPU_TIMER_NUM] = {
 #endif
 };
 u32 timer_bit_map[NPU_TIMER_NUM] = {
-#if defined(AN7581)
+#if defined(AN7581) || defined(EN7523)
 	0, 1, 2, 5
 #elif defined(AN7552)
 	0, 1, 2, 5, 6, 7, 8, 3
@@ -51,25 +54,25 @@ u32 timer_bit_map[NPU_TIMER_NUM] = {
 };
 u32 timer_counter_reg[NPU_TIMER_NUM] = {
 	0x1EC10108, 0x1EC10110, 0x1EC10118, 0x1EC10130,
-#if !defined(AN7581)
+#if !defined(AN7581) && !defined(EN7523)
 	0x1EC10140, 0x1EC10120, 0x1EC10128, 0x1EC10154,
 #endif
-#if !defined(AN7581) && !defined(AN7552)
+#if !defined(AN7581) && !defined(EN7523) && !defined(AN7552)
 	0x1EC10208, 0x1EC10210, 0x1EC10218, 0x1EC10230,
 	0x1EC10240, 0x1EC10220, 0x1EC10228, 0x1EC10254,
 #endif
 };
 u32 timer_reload_reg[NPU_TIMER_NUM] = {
 	0x1EC10104, 0x1EC1010C, 0x1EC10114, 0x1EC1012C,
-#if !defined(AN7581)
+#if !defined(AN7581) && !defined(EN7523)
 	0x1EC1013C, 0x1EC1011C, 0x1EC10124, 0x1EC10150,
 #endif
-#if !defined(AN7581) && !defined(AN7552)
+#if !defined(AN7581) && !defined(EN7523) && !defined(AN7552)
 	0x1EC10204, 0x1EC1020C, 0x1EC10214, 0x1EC1022C,
 	0x1EC1023C, 0x1EC1021C, 0x1EC10224, 0x1EC10250,
 #endif
 };
-#if !defined(AN7581)
+#if !defined(AN7581) && !defined(EN7523)
 /* timers 3..6 share a control bit with another block; clear it on enable */
 u32 timer_pair_bit[4] = { 0x19, 0x1a, 0x1b, 0x1c };
 #endif
