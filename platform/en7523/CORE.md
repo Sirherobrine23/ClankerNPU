@@ -16,16 +16,20 @@ For EN7523, NOWIFI is now the default. `make SOC=EN7523 WIFI=DIAG check`
 retains the previous standalone diagnostic target.
 
 Main-runtime outputs are in `build/EN7523_NOWIFI/`. Rebuild the host client in
-platform/en7523/mailbox-host.c with the OpenWrt ARM compiler. Replace BOTH
-firmware images, retaining the existing airoha_all diagnostic-loader filenames:
+platform/en7523/mailbox-host.c with the OpenWrt ARM compiler. Apply the matching
+normal-loader kernel follow-up on airoha_all, remove
+`airoha,diagnostic-firmware;` from the NPU node and install BOTH images:
 
-- npu_rv32.bin -> /lib/firmware/airoha/en7523_diag_npu_rv32.bin
-- npu_data.bin -> /lib/firmware/airoha/en7523_diag_npu_data.bin
+- npu_rv32.bin -> /lib/firmware/airoha/en7523_npu_rv32.bin
+- npu_data.bin -> /lib/firmware/airoha/en7523_npu_data.bin
 
-Keep `airoha,diagnostic-firmware;` on the NPU node and the airoha_all loader
-patch. This loader isolates WLAN/PPE consumers while testing the core-only
-runtime. No additional kernel or mt76 patch is needed. Cold reboot; do not
-replace or restart firmware in a live offload session.
+Remove stale firmware-name overrides or point them to these two names.
+The kernel recognizes the core-only image from its descriptor, confirms all
+four harts and queries version 2.0 using the existing function-7 protocol.
+WLAN/PPE consumers remain unavailable because their commands are not yet
+implemented. Rebuild kernel/DTB/firmware together and cold reboot. The previous
+diagnostic loader cannot select these images without its old property; the
+previous descriptor-less core image is not supported by the new loader.
 
 On the router:
 
@@ -39,12 +43,24 @@ heartbeats and C signatures 0x434f5200..0x434f5203 (COR + hart).
 The client supports diagnostic record ABI 3 and main-core record ABI 4.
 Wire ABI remains 1, transport function 7 and the bounded 64-byte request remain
 unchanged. The version field distinguishes this runtime from diagnostic 1.1.
-The kernel still labels the loader mode as diagnostic, not the runtime version.
+The kernel reports ClankerNPU core v2.0 after a successful startup handshake.
+The firmware request count includes that first kernel request. Response word
+13 now reports capabilities (zero for this core-only target).
 
 Optional: `./mailbox-host trap 1` deliberately parks worker 1 until reboot.
 A following status must show state 2 / cause 11 on that worker while the other
 harts and mailbox advance. This now exercises the main trap_vector and
 trap_dispatch rather than the standalone stackless diagnostic handler.
+
+## Image descriptor
+
+The first 0x108 bytes are unchanged. A jump at 0x108 skips eight little-endian
+words at 0x10c: magic 0x4e414c43/0x0052454b (CLANKER plus NUL), descriptor ABI 1,
+mailbox wire ABI 1, record ABI 4, capability mask 0, version 0x00020000 and a
+reserved zero word. The linker asserts its offset and the software check
+validates all fields. The descriptor lets the kernel choose the private
+startup handshake without an experimental device-tree property. Capability
+bits are intentionally zero until corresponding datapath support exists.
 
 ## Execution path
 
@@ -103,7 +119,9 @@ initialization, mailbox replies/rejections and a terminal worker trap followed
 by a successful status request. MMIO writes are restricted in the model to
 mailbox/boot-signature registers; no reset or datapath writes occur on these
 paths. The model does not simulate MPIS, caches, hardware interrupts or the
-interconnect. This is not hardware validation of the main runtime.
+interconnect. The preceding descriptor-less core runtime has passed the four-hart
+heartbeat and status tests on EN7523 hardware. The new descriptor and kernel
+startup handshake still require hardware validation.
 
 All eleven existing AN75xx variants were rebuilt with fixed GITREV=x and their
 22 firmware files compared byte-for-byte to the original build. They remained

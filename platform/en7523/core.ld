@@ -30,3 +30,5 @@ SECTIONS
 ASSERT(en7523_prologue_end - _start == 0x108, "EN7523 boot prefix changed")
 ASSERT(__bss_end <= 0x1e906800, "globals overlap common debug block")
 ASSERT(ORIGIN(STACK) + LENGTH(STACK) <= ORIGIN(DIAG), "stack overlaps records")
+
+ASSERT(en7523_image_header - _start == 0x10c, "EN7523 descriptor moved")

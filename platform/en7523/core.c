@@ -91,6 +91,7 @@ int en7523_diag_mail(u32 base, u32 size)
 	for (i = 0; i < MAX_CORE_NUM; i++)
 		p[7 + i] = CORE_RECORD(i)[3];
 	p[11] = requests;
+	p[13] = 0; /* Core-only capability mask; no WLAN/PPE commands. */
 	p[4] = 0;
 	__asm__ volatile("fence rw, rw" ::: "memory");
 	return 1;

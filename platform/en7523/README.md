@@ -1,5 +1,8 @@
 # EN7523 NPU v1 diagnostic mailbox
 
+This document covers the legacy standalone `WIFI=DIAG` target. For the current
+shared core runtime and normal kernel firmware loading, follow [CORE.md](CORE.md).
+
 Follow-up to the diagnostic boot foundation. The four harts retain the
 byte-identical stock 0x108-byte cache/MPIS prefix and stackless trap capture, then call a freestanding C initializer.
 Hart 0 polls hardware mailbox queue 0; other harts publish heartbeats and can run an explicit terminal trap test.
@@ -8,9 +11,9 @@ No PLIC, UART, timers, mutexes, DMA or WiFi datapath is initialized.
 ## Build
 
 ```sh
-make SOC=EN7523
-make SOC=EN7523 check disasm
-make SOC=EN7523 check REFERENCE=/absolute/path/to/stock/npu_rv32.bin
+make SOC=EN7523 WIFI=DIAG
+make SOC=EN7523 WIFI=DIAG check disasm
+make SOC=EN7523 WIFI=DIAG check REFERENCE=/absolute/path/to/stock/npu_rv32.bin
 ```
 
 GNU RISC-V GCC and binutils are required for the firmware. Outputs are in
@@ -86,19 +89,19 @@ other function, pointer or size are rejected without dereferencing the pointer.
 The pending queue-0 interrupt bit is acknowledged by W1C; no interrupt is used.
 Only the final CTRL3 write publishes completion, after a fence.
 
-| Word | Field |
-|---|---|
-| 0 | magic 0x4e50444d |
-| 1 | wire ABI 1 |
-| 2 | host sequence, preserved |
-| 3 | command: 0 ping, 1 status, 2 terminal worker ECALL |
-| 4 | response status: 0 success, 1 unsupported command |
-| 5 | firmware version 0x00010000 |
-| 6 | hart count 4 |
-| 7..10 | state of harts 0..3 |
-| 11 | total handled requests, including rejected frames |
-| 12 | target hart for command 2 (1..3 only) |
-| 13..15 | reserved |
+| Word   | Field                                              |
+| ------ | -------------------------------------------------- |
+| 0      | magic 0x4e50444d                                   |
+| 1      | wire ABI 1                                         |
+| 2      | host sequence, preserved                           |
+| 3      | command: 0 ping, 1 status, 2 terminal worker ECALL |
+| 4      | response status: 0 success, 1 unsupported command  |
+| 5      | firmware version 0x00010000                        |
+| 6      | hart count 4                                       |
+| 7..10  | state of harts 0..3                                |
+| 11     | total handled requests, including rejected frames  |
+| 12     | target hart for command 2 (1..3 only)              |
+| 13..15 | reserved                                           |
 
 Diagnostic records retain the base layout: 64 bytes per hart at
 0x840f0000 + hart*64. Offsets 0 magic 0x454e5055, 4 record ABI (now 3),

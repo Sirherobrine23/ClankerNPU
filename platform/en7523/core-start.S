@@ -73,6 +73,18 @@ _start:
 	csrrs x0, 0x7c0, x10
 	fence.i
 en7523_prologue_end:
+	/* Skip the host-readable descriptor without changing the stock prefix. */
+	j .Lentry
+	.global en7523_image_header
+en7523_image_header:
+	.word 0x4e414c43, 0x0052454b /* "CLANKER\0", little endian */
+	.word 1 /* Descriptor ABI. */
+	.word 1 /* Mailbox wire ABI. */
+	.word 4 /* Per-hart record ABI. */
+	.word 0 /* No WLAN/PPE capabilities yet. */
+	.word 0x00020000 /* Core firmware version 2.0. */
+	.word 0 /* Reserved. */
+.Lentry:
 	csrci mstatus, 8
 	csrw mie, zero
 	csrr a0, mhartid

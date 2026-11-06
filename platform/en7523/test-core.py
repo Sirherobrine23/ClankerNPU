@@ -4,10 +4,13 @@ from pathlib import Path
 import hashlib
 import re
 import sys
+import struct
 
 root = Path(sys.argv[1])
 image = (root / 'npu_rv32.bin').read_bytes()
 assert hashlib.sha256(image[:0x108]).hexdigest().startswith('1752af1bbce53493')
+assert struct.unpack_from('<8I', image, 0x10c) == (
+    0x4e414c43, 0x0052454b, 1, 1, 4, 0, 0x20000, 0)
 mem = {}
 def load(addr, data):
     for i, byte in enumerate(data): mem[addr+i] = byte
@@ -124,6 +127,7 @@ def request(cmd, target=0, func=7, ptr=0x840f1000):
 for cmd in (0,1):
     control,status=request(cmd);assert control&0x1e==6 and status==0
     assert read(0x840f1014)==0x20000
+    assert read(0x840f1034)==0, "unexpected datapath capabilities"
 for kw in (dict(func=0),dict(func=15),dict(ptr=0),dict(cmd=3)):
     args=dict(cmd=0);args.update(kw);control,_=request(**args);assert control&0x1e==2
 control,status=request(2,1);assert control&0x1e==6 and status==0
