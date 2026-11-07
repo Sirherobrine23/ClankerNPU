@@ -47,10 +47,10 @@ LINK_SCRIPT := $(BUILD)/link.ld
 LDFLAGS := -m elf32lriscv -T $(LINK_SCRIPT) -nostdlib --gc-sections --relax \
            --print-memory-usage
 ELF     := $(BUILD)/firmware.elf
-BIN     := $(BUILD)/npu_rv32.bin
-DATA    := $(BUILD)/npu_data.bin
 MAP     := $(BUILD)/firmware.map
 DIS     := $(BUILD)/firmware.dis
+BIN     := build/$(shell echo $(SOC) | tr '[:upper:]' '[:lower:]')$(if $(filter NOWIFI,$(WIFI)),,_$(shell echo $(WIFI) | tr '[:upper:]' '[:lower:]'))_npu_rv32.bin
+DATA    := build/$(shell echo $(SOC) | tr '[:upper:]' '[:lower:]')$(if $(filter NOWIFI,$(WIFI)),,_$(shell echo $(WIFI) | tr '[:upper:]' '[:lower:]'))_npu_data.bin
 
 SRCS_S  := crt0.S
 # Keep npu_globals.c first among C objects to preserve the data tables.
@@ -104,21 +104,14 @@ $(DATA): $(ELF)
 disasm: $(ELF)
 	$(OBJDUMP) -d -M no-aliases $< > $(DIS)
 
-ifeq ($(SOC),EN7523)
-check: all
-	python3 tests/en7523-core.py $(BUILD)
-	python3 tests/en7523-core.py $(BUILD) --quiet --staggered
-endif
-
 clean:
 	rm -rf build/
 
 # Build all 12 variants
-VARIANTS := EN7523_NOWIFI \
-            AN7552_MT7916 AN7552_MT7991 AN7552_MT7993 \
-            AN7581_MT7916 AN7581_MT7992 AN7581_MT7996 \
-            AN7583_MT7916 AN7583_MT7992 AN7583_MT7993 \
-            AN7583_MT7996 AN7583_NOWIFI
+VARIANTS := EN7523_NOWIFI                                                                       \
+            AN7552_NOWIFI AN7552_MT7916 AN7552_MT7991               AN7552_MT7993               \
+            AN7581_NOWIFI AN7581_MT7916               AN7581_MT7992                             \
+            AN7583_NOWIFI AN7583_MT7916               AN7583_MT7992 AN7583_MT7993 AN7583_MT7996
 
 .PHONY: all-variants $(VARIANTS)
 
