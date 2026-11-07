@@ -2,7 +2,7 @@
 
 `make SOC=EN7523` builds the four-hart md32rv firmware using the common
 startup, interrupt, timer, mutex, mailbox and debug sources. NOWIFI provides core services; `WIFI=MT7915` adds the
-[mt76 receive transport](wireless.md) for single-HIF DBDC radios.
+[mt76 receive transport](wireless.md) for single-HIF DBDC or separate radios.
 
 ## Startup and memory
 
@@ -103,7 +103,7 @@ kernel filenames are:
 
 A device-tree `firmware-name` property overrides these names. Ensure its code
 and data names select the same build. Replace both files together and reboot.
-The normal version query reports 7.8 with this firmware; it remains optional
+The normal version query reports 7.8 for NOWIFI and 7.9 for MT7915; it remains optional
 for older firmware that returns EOPNOTSUPP.
 Successful loading and core release do not establish packet-offload support.
 

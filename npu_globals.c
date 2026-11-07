@@ -624,7 +624,7 @@ u32 en7523_wifi_prepared[2];
 u32 en7523_wifi_regs[2];
 u32 en7523_wifi_ring[2];
 u32 en7523_wifi_index[2];
-u32 en7523_wifi_port;
+u32 en7523_wifi_port[2];
 u32 en7523_wifi_total[2];
 u32 en7523_wifi_part[2];
 u32 en7523_wifi_drop[2];

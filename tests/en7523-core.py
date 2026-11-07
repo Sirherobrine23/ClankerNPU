@@ -244,7 +244,7 @@ if quiet:
 else:
     assert 'bite my shiny metal NPU' in console
     assert 'core freq at 500 MHz' in console
-    assert ('NPU Version: TLB7.8.0.0_v003.' + ('MT7915.' if wifi else 'NOWIFI.')) in console
+    assert ('NPU Version: TLB7.' + ('9' if wifi else '8') + '.0.0_v003.' + ('MT7915.' if wifi else 'NOWIFI.')) in console
     assert 'cores enabled f, running f' in console
     assert 'Error:' not in console
     for hart in range(4):
@@ -275,7 +275,7 @@ for ptr in (0x85012000, 0x8a004000):
     assert read(ptr+12)==0x12345678, 'response exceeded SDK payload'
     for ifindex in (0, 3, 15):
         control,version=request(cmd=10, ptr=ptr, ifindex=ifindex)
-        assert control&0x1e==6 and version==0x00070008
+        assert control&0x1e==6 and version==(0x00070009 if wifi else 0x00070008)
         assert read(ptr)==0x30|ifindex and read(ptr+4)==10
         assert read(ptr+12)==0x12345678, 'version exceeded its response word'
 # Wire values must match the host enum, not Linux's negative errno numbers.
@@ -325,7 +325,7 @@ for kwargs, expected in (({},1), (dict(cmd=10),1), (dict(ptr=0),EINVAL),
     before=read(0x1ec0c0b8)
     _,info=request(arg=0,**kwargs)
     if kwargs.get('cmd')==10:
-        assert info==0x00070008
+        assert info==(0x00070009 if wifi else 0x00070008)
     assert read(0x1ec0c0b0)==0
     assert read(0x1ec0c0b4)==expected
     assert read(0x1ec0c0b8)==before+1 and not mutex_owner

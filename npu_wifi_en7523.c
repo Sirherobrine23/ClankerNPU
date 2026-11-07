@@ -16,7 +16,7 @@ extern u32 en7523_wifi_prepared[2];
 extern u32 en7523_wifi_regs[2];
 extern u32 en7523_wifi_ring[2];
 extern u32 en7523_wifi_index[2];
-extern u32 en7523_wifi_port;
+extern u32 en7523_wifi_port[2];
 extern u32 en7523_wifi_total[2];
 extern u32 en7523_wifi_part[2];
 extern u32 en7523_wifi_drop[2];
@@ -54,7 +54,7 @@ static int en7523_wifi_prepare(u32 band, u32 count)
 		return NPU_MBOX_SUCCESS;
 
 	/* The SDK's P1 window is at SCU +0x38, P0 at +0x30. */
-	window = en7523_wifi_port ? PCIE0_WIN_BASE : 0x1fa90030;
+	window = en7523_wifi_port[band] ? PCIE0_WIN_BASE : PCIE1_WIN_BASE;
 	REG32(window) = en7523_wifi_ring[1];
 	REG32(window + 4) = en7523_wifi_ring[0] + RX_DESCS * 16;
 	for (i = 0; i < count; i++, desc += 4) {
@@ -91,15 +91,13 @@ static int en7523_wifi_run(u32 band, u32 enable)
 	}
 	if (!en7523_wifi_prepared[band])
 		return NPU_MBOX_ENODEV;
-	for (i = 0; i < 2; i++) {
-		base = REG32(HOSTADPT_RX_BASE_PTR(i));
-		if ((base & 3) || base < 0x80000000 || base > 0xbfffd000 ||
-		    REG32(HOSTADPT_RX_MAX_CNT(i)) != 512)
-			return NPU_MBOX_EINVAL;
-	}
+	base = REG32(HOSTADPT_RX_BASE_PTR(band));
+	if ((base & 3) || base < 0x80000000 || base > 0xbfffd000 ||
+	    REG32(HOSTADPT_RX_MAX_CNT(band)) != 512)
+		return NPU_MBOX_EINVAL;
 	if (en7523_wifi_enabled[band])
 		return NPU_MBOX_SUCCESS;
-	hostadpt_init();
+	hostadpt_rx_init(band);
 	en7523_wifi_total[band] = 0;
 	en7523_wifi_part[band] = 0;
 	en7523_wifi_drop[band] = 0;
@@ -133,16 +131,18 @@ int en7523_wifi_set(u32 *msg)
 		break;
 	case WLAN_FUNC_SET_WAIT_PKT_BUF_ADDR:
 		if (val < 0x80000000 || val > 0xc0000000 - (5600u << 12) ||
-		    (val & 0xfff) || en7523_wifi_prepared[0] ||
-		    en7523_wifi_prepared[1])
+		    (val & 0xfff))
+			return NPU_MBOX_EINVAL;
+		/* Both PCIe consumers share one pool without resetting its IDs. */
+		if (val != wifi_pkt_buf_addr &&
+		    (en7523_wifi_prepared[0] || en7523_wifi_prepared[1]))
 			return NPU_MBOX_EINVAL;
 		wifi_pkt_buf_addr = val;
 		break;
 	case WLAN_FUNC_SET_WAIT_PCIE_PORT_TYPE:
-		if (val > 1 || en7523_wifi_prepared[0] ||
-		    en7523_wifi_prepared[1])
+		if (val > 1 || en7523_wifi_prepared[band])
 			return NPU_MBOX_EINVAL;
-		en7523_wifi_port = val;
+		en7523_wifi_port[band] = val;
 		break;
 	case WLAN_FUNC_SET_WAIT_IS_FORCE_TO_CPU:
 		if (val != 1)

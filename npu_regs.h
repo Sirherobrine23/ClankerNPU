@@ -90,8 +90,8 @@
  * chip behind each port may reach */
 #define PCIE0_WIN_BASE          0x1FA90038
 #define PCIE0_WIN_END           0x1FA9003C
-#if defined(AN7552)
-/* AN7552: second window sits beside the first */
+#if defined(AN7552) || defined(EN7523)
+/* The v1 and AN7552 second windows sit beside the first. */
 #define PCIE1_WIN_BASE          0x1FA90030
 #define PCIE1_WIN_END           0x1FA90034
 /* WiFi link state; 6 disables the tunnel offload */

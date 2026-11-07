@@ -173,7 +173,9 @@ descriptor is selected explicitly by the matching mt76 profile.
 GET_WAIT_NPU_VERSION (10) works on every build, including NOWIFI. It returns
 one little-endian u32: major in bits 31:16, minor in bits 15:0. Both the boot
 banner and this reply use `NPU_VERSION_MAJOR`/`NPU_VERSION_MINOR`; the current
-value is `0x00070008` (7.8). The full suffix and Git revision remain in the
+value is `0x00070009` (7.9) on EN7523/MT7915 and `0x00070008` (7.8) on
+other builds. Version 7.9 adds independent PCIe/host queues for separate
+EN7523 MT7915 radios. The full suffix and Git revision remain in the
 banner and debug block. NOWIFI's GET_WAIT_NPU_INFO returns zero and does not
 advertise a WiFi datapath.
 

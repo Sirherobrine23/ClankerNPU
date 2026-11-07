@@ -23,10 +23,27 @@ airoha,npu-port-type = <1>;
 ```
 
 `npu_enable=0` keeps mt7915e on its ordinary receive path. When selected, the
-transport excludes WED and requires a little-endian EN7523 with one PCIe
-MT7915 DBDC radio. It checks the normal version query (7.8 or newer) and firmware ring
+transport excludes WED and requires a little-endian EN7523 with single-HIF
+MT7915 devices. It checks the normal version query and firmware ring
 availability before publishing DMA storage. It uses the normal NPU provider probe, without demand-start or
 an Ethernet startup call.
+
+### Separate PCIe radios
+
+The Askey RTF8225VW board identified as MT7975N/MT7975AN exposes two
+independent `14c3:7915` functions. The DTS assigns queue 0 to PCIe0 and
+queue 1 to PCIe1; queue selection does not depend on the configured RF band.
+Each function uses one NPU queue, independently of its local hardware band.
+Its PCI node adds `airoha,npu-rx-queue = <0>` or `<1>` to the profile above,
+with `airoha,npu-port-type` set to its own PCIe port. DBDC nodes omit the
+queue property and claim both queues. Overlapping claims are rejected.
+
+Firmware 7.9 is required for separate radios. It configures the PCIe port
+per queue and allows either host ring to start before the other exists.
+The shared packet-pool address may be repeated unchanged by a second
+consumer; changing it after ring preparation is rejected. A DBDC driver
+still accepts firmware 7.8 and publishes both rings before starting them.
+Firmware 7.9 also supports the XX230v DBDC configuration.
 
 ## Receive path
 
@@ -71,18 +88,23 @@ DRIVER_MODEL (5), PKT_BUF_ADDR (8), IS_FORCE_TO_CPU (12, value 1 only) and
 PCIE_PORT_TYPE (14). Supported GETs are NPU_INFO (0), RXDESC_BASE (4) and
 NPU_VERSION (10). BA, TX and PPE commands return EOPNOTSUPP.
 
-The host prepares both radio rings, publishes both host rings and only then
-sends NPU_INIT_DONE=1 for each band. Value 0 disables that worker and waits
+The host prepares its radio rings, publishes all host rings owned by that
+device and only then sends NPU_INIT_DONE=1 for each queue. Separate radios
+can probe in either order. Value 0 disables only that worker and waits
 until its in-flight copy has finished. The worker publishes Busy before
 checking Enable, so a completed STOP prevents later writes to freed host
 buffers. The driver retains storage if STOP fails. Radio recovery or rebinding
 a prepared radio still requires a reboot; it does not reuse a retired ring.
+Cleanup masks, stops and clears only the device's queues. Retired queues
+remain unavailable until reboot, including after a failed probe.
 
 ## Validation
 
 ```sh
 make all-variants GITREV=x
 python3 tests/en7523-core.py build/EN7523_MT7915
+python3 tests/en7523-core.py build/EN7523_MT7915 --split
+python3 tests/en7523-core.py build/EN7523_MT7915 --split --reverse --quiet --staggered
 python3 tests/en7523-core.py build/EN7523_NOWIFI --quiet --staggered
 ```
 
@@ -90,12 +112,35 @@ The linked-image model checks two-band RX, raw byte preservation, fragmented
 frames, descriptor ownership, ring wrapping and STOP, in addition to the
 common boot/IRQ tests. The model does not validate PCIe window routing,
 interrupt timing or throughput on silicon.
+Split-radio runs start each queue with the other host ring absent, repeat
+the shared pool configuration without reallocating IDs and verify that
+stopping one worker leaves the other receiving. Both probe orders are tested.
+
+An Askey RTF8225VW RAM boot on 2026-11-07 verified firmware 7.9, four hart
+self-tests and both independent mt76 consumers. PCIe0 used queue 0/IRQ 37;
+PCIe1 used queue 1/IRQ 38. Both queues delivered packets. A phone associated
+with `OpenWrt2` on PCIe1 at 5 GHz/channel 36/80 MHz, obtained a DHCP lease
+and exchanged traffic through the GPON WAN. User-provided ten-second TCP
+tests to `172.16.0.1` measured 114 Mbit/s upload and 251 Mbit/s download at
+the receivers, with 262 and 331 sender retransmissions respectively.
+
+A subsequent computer test on the same 5 GHz AP measured 135 Mbit/s upload
+and 317 Mbit/s download at the receivers, with 21 and 55 sender TCP
+retransmissions respectively. DHCP and hostapd records confirmed that the
+computer used PCIe1's AP; it had disconnected before station-rate inspection.
+
+The first radio was temporarily enabled in its existing 5 GHz configuration
+during that validation and then restored to its original disabled state.
+The throughput runs are initial measurements with configuration activity,
+not controlled RF benchmarks. Association and traffic at 2.4 GHz, sustained
+dual-radio load and hardware recovery remain unvalidated.
 
 An XX230v RAM boot on 2026-11-06 verified all four hart self-tests and RX
 interrupts, descriptors and packets on both bands. A phone associated on
 channel 36 at 80 MHz, obtained a DHCP lease and exchanged data in both
-directions. The cycle-counter enable must precede secondary-hart startup
-delays; enabling it later leaves the RX workers stuck before their loops.
+directions. These XX230v hardware measurements used firmware 7.8; the 7.9
+DBDC path is covered by the linked-image regression test. The cycle-counter
+enable must precede secondary-hart startup delays; enabling it later leaves the RX workers stuck before their loops.
 Long-duration throughput, stress and recovery testing remain open.
 
 EN7523 copies aligned packet buffers with unrolled 32-bit loads and stores,

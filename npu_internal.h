@@ -276,6 +276,9 @@ int en7523_wifi_get(u32 *msg);
 
 /* npu_wifi.c */
 int hostadpt_init(void);
+#ifdef EN7523
+void hostadpt_rx_init(u32 band);
+#endif
 void tdma_init(void);
 void dbg_cnt_isr(int src);
 #if defined(HAS_BME) || defined(WIFI_EAGLE)

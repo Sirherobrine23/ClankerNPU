@@ -5,7 +5,8 @@ Airoha EN7523, AN7552, AN7581 and AN7583 SoCs. The NPU is a cluster of
 RV32IM (EN7523) or RV32IMC (AN75xx) harts with no OS and no MMU. Each hart runs one polling loop. Together
 they offload WiFi forwarding, tunnel header rewrites and GPON upstream
 scheduling from the ARM host on AN75xx. EN7523 provides core services, mailbox control and an MT7915 receive
-transport for mt76. Radio TX and receive reordering remain on the host.
+transport for mt76, with one DBDC device or two separate PCIe radios.
+Radio TX and receive reordering remain on the host.
 
 ## Variants
 

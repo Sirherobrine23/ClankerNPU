@@ -3,7 +3,11 @@
 
 /* Boot version line: release.wifi chip.git hash */
 #define NPU_VERSION_MAJOR	7
+#if defined(EN7523) && defined(MT7915)
+#define NPU_VERSION_MINOR	9
+#else
 #define NPU_VERSION_MINOR	8
+#endif
 #define NPU_VERSION_CODE	((NPU_VERSION_MAJOR << 16) | NPU_VERSION_MINOR)
 #define NPU_STRINGIFY_(x)	#x
 #define NPU_STRINGIFY(x)	NPU_STRINGIFY_(x)

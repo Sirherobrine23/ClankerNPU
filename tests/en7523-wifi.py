@@ -1,39 +1,46 @@
 # Executed by en7523-core.py after boot, using the linked RV32 image.
 
+split = '--split' in sys.argv[2:]
+order = (1, 0) if '--reverse' in sys.argv[2:] else (0, 1)
+ports = (0, 1) if split else (1, 1)
+radio_regs = (0x20004500, 0x22004500) if split else (0x20004500, 0x20004510)
+
 def set_cmd(cmd, value, band=0, expected=1):
     ctrl,_=request(cmd=cmd, msg_type=1, ifindex=band, value=value)
     assert ctrl&0x1e==(expected<<2)|2,(cmd,value,band,hex(ctrl))
 
-set_cmd(8,0x84d00000)
-set_cmd(5,1)
-set_cmd(14,1)
 set_cmd(12,0,expected=EOPNOTSUPP)
-set_cmd(12,1)
 set_cmd(4,1,expected=EOPNOTSUPP)
 set_cmd(1,1537,expected=EINVAL)
 set_cmd(2,1,expected=ENODEV)
 rings=[]
 for band in range(2):
-    set_cmd(0,0x20004500+band*16,band)
-    set_cmd(1,1536,band)
     ctrl,ring=request(cmd=4,ifindex=band)
     assert ctrl&0x1e==6 and 0x1e800000<=ring<0x1e860000
     rings.append(ring)
 assert rings[0]-rings[1]==0x6020
-ids=[read(ring+i*16) for ring in rings for i in range(1536)]
-assert len(set(ids))==3072
-assert all(0x84d00000<=addr<0x86300000 and not addr&4095 for addr in ids)
-assert read(0x1fa90038)==rings[1] and read(0x1fa9003c)==rings[0]+1536*16
-
 host=[0x88000000,0x88010000]
 buffers=[0x89000000,0x89400000]
-for band in range(2):
+
+def configure(band):
+    set_cmd(8,0x84d00000,band)
+    set_cmd(5,1,band)
+    set_cmd(14,ports[band],band)
+    set_cmd(12,1,band)
+    set_cmd(0,radio_regs[band],band)
+    set_cmd(1,1536,band)
+    window=0x1fa90030+ports[band]*8
+    assert read(window)==rings[1] and read(window+4)==rings[0]+1536*16
+    set_cmd(8,0x84d00000,band)
+    set_cmd(8,0x84d01000,band,expected=EINVAL)
+    set_cmd(14,1-ports[band],band,expected=EINVAL)
+    assert read(symbol('en7523_wifi_port')+band*4)==ports[band]
+
+def publish(band):
     for i in range(512):
         load(host[band]+i*24+12,(buffers[band]+i*4096).to_bytes(4,'little'))
     load(0x1ec0d180+band*16,host[band].to_bytes(4,'little'))
     load(0x1ec0d184+band*16,(512).to_bytes(4,'little'))
-for band in range(2):
-    set_cmd(2,1,band)
 
 def packet(band, blob, last=True):
     index=read(symbol('en7523_wifi_index')+band*4)
@@ -49,7 +56,7 @@ def packet(band, blob, last=True):
             break
     else:
         raise AssertionError('WiFi descriptor was not returned')
-    assert read(0x20004508+band*16)==index
+    assert read(radio_regs[band]+8)==index
     assert read(desc+4)==3500<<16
     return desc
 
@@ -69,10 +76,38 @@ def check_host(band,index,blob,total,part,parts,last):
     assert read(d+8)==0 and read(d+16)==0 and read(d+20)==0
     load(d,b'\0'*12)
 
+# Split consumers may probe in either order, without the other host ring.
+if split:
+    for n,band in enumerate(order):
+        configure(band)
+        set_cmd(2,1,band,expected=EINVAL)
+        publish(band)
+        set_cmd(2,1,band)
+        blob=body(1536+band*65)
+        packet(band,blob)
+        check_host(band,0,blob,len(blob),1,1,True)
+        other=1-band
+        assert read(symbol('en7523_wifi_enabled')+band*4)==1
+        if not n:
+            assert read(0x1ec0d180+other*16)==0
+            assert read(symbol('en7523_wifi_enabled')+other*4)==0
+        else:
+            assert read(symbol('en7523_wifi_enabled')+other*4)==1
+else:
+    for band in range(2):
+        configure(band)
+        publish(band)
+    for band in range(2):
+        set_cmd(2,1,band)
+        blob=body(1536+band*65)
+        packet(band,blob)
+        check_host(band,0,blob,len(blob),1,1,True)
+    assert read(0x1fa90030)==0 and read(0x1fa90034)==0
+
+ids=[read(ring+i*16) for ring in rings for i in range(1536)]
+assert len(set(ids))==3072
+assert all(0x84d00000<=addr<0x86300000 and not addr&4095 for addr in ids)
 for band in range(2):
-    blob=body(1536+band*64)
-    packet(band,blob)
-    check_host(band,0,blob,len(blob),1,1,True)
     assert read(0x1ec0d188+band*16)==1
 
 # Large frames use multiple host descriptors, preserving every raw RX byte.
@@ -111,6 +146,12 @@ assert read(symbol('en7523_wifi_busy'))==1 and read(desc+4)&0x80000000
 set_cmd(2,0)
 check_host(0,head,blob,len(blob),1,1,True)
 assert read(symbol('en7523_wifi_enabled'))==0
+# Stopping one radio must leave the other worker and host ring operational.
+head=read(0x1ec0d198)
+blob=body(193)
+packet(1,blob)
+check_host(1,head,blob,len(blob),1,1,True)
+assert read(symbol('en7523_wifi_enabled')+4)==1
 
 # After STOP acknowledges, a pending radio descriptor cannot reach freed host memory.
 for band in range(2):
@@ -124,4 +165,4 @@ for band in range(2):
     assert read(desc+4)&0x80000000
     assert read(0x1ec0d188+band*16)==host_index
     assert read(symbol('en7523_wifi_busy')+band*4) in (0,1)
-print('PASS: MT7915 dual-band RX, 24-byte host ABI, raw bytes, fragments, backpressure, index wrap, STOP quiescence')
+print('PASS: MT7915 ' + ('split radios ' + str(order) if split else 'DBDC') + ', independent PCIe/host rings, shared pool, raw bytes, fragments, backpressure, index wrap, isolated STOP')

@@ -29,6 +29,18 @@ u32 hostadpt_in_size[2];
 u32 hostadpt_in_ridx[2];
 #endif
 
+#ifdef EN7523
+void hostadpt_rx_init(u32 band)
+{
+	/* A split radio may start before the other host ring exists. */
+	if (band)
+		hostadpt_rx_ring_base = REG32(HOSTADPT_RX_BASE_PTR(1));
+	else
+		hostadpt_tx_ring_base = REG32(HOSTADPT_RX_BASE_PTR(0));
+	hostadpt_tx_ring_ready = 1;
+}
+#endif
+
 int hostadpt_init(void)
 {
 #ifdef HAS_NPU_WIFI_TX
