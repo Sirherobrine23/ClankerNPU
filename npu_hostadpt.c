@@ -30,6 +30,8 @@ u32 hostadpt_in_ridx[2];
 #endif
 
 #ifdef EN7523
+extern u32 en7523_host_index[2];
+
 void hostadpt_rx_init(u32 band)
 {
 	/* A split radio may start before the other host ring exists. */
@@ -37,7 +39,18 @@ void hostadpt_rx_init(u32 band)
 		hostadpt_rx_ring_base = REG32(HOSTADPT_RX_BASE_PTR(1));
 	else
 		hostadpt_tx_ring_base = REG32(HOSTADPT_RX_BASE_PTR(0));
+	en7523_host_index[band] = REG32(HOSTADPT_RX_DMA_IDX(band));
 	hostadpt_tx_ring_ready = 1;
+}
+
+void hostadpt_rx_flush(u32 band)
+{
+	u32 idx = en7523_host_index[band];
+
+	if (idx == REG32(HOSTADPT_RX_DMA_IDX(band)))
+		return;
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+	REG32(HOSTADPT_RX_DMA_IDX(band)) = idx;
 }
 #endif
 
@@ -79,7 +92,7 @@ int hostadpt_init(void)
 
 static void host_ring_write_desc(u32 desc_addr, u32 buf_addr, u16 pkt_len,
 				 u16 wcid, u8 amsdu, u8 fwd_type,
-				 u16 orig_len, u8 is_last, u32 info)
+				 u16 orig_len, u8 is_last, u32 info, u32 band)
 {
 	/* word 0 carries the ready bit: store it last */
 	volatile u32 *d = (volatile u32 *)desc_addr;
@@ -97,7 +110,12 @@ static void host_ring_write_desc(u32 desc_addr, u32 buf_addr, u16 pkt_len,
 			(*(u32 *)(counter_base_tri + 0x30))++;
 	}
 
-	bridge_dma_copy(3, buf_addr, d[3], dma_len);
+#ifdef EN7523
+	/* Each RX hart owns one channel, including separate PCIe radios. */
+	bridge_dma_copy(band, buf_addr, d[3], dma_len);
+#else
+	bridge_dma_copy(DMA_COPY_HOST_CHANNEL, buf_addr, d[3], dma_len);
+#endif
 
 	d[2] = info;
 #ifdef EN7523
@@ -134,6 +152,21 @@ int host_ring_submit(u32 buf_addr, u16 pkt_len, u32 band,
 		(*ctr)++;
 	}
 
+#ifdef EN7523
+	if (band > 1)
+		return -1;
+	idx = en7523_host_index[band];
+	ring_base = band ? hostadpt_rx_ring_base : hostadpt_tx_ring_base;
+	check_idx = (idx + 2) % HOSTADPT_RING_SIZE;
+	if ((*(volatile u32 *)(ring_base + idx * 24) & 1) ||
+	    (*(volatile u32 *)(ring_base + check_idx * 24) & 1))
+		return -1;
+	desc_addr = ring_base + idx * 24;
+	host_ring_write_desc(desc_addr, buf_addr, pkt_len, wcid,
+			     amsdu, fwd_type, orig_len, is_last, info, band);
+	en7523_host_index[band] = (idx + 1) % HOSTADPT_RING_SIZE;
+	return 0;
+#else
 	if (band == 0) {
 		idx = REG32(HOSTADPT_RX_DMA_IDX(0));
 		ring_base = hostadpt_tx_ring_base;
@@ -159,7 +192,7 @@ int host_ring_submit(u32 buf_addr, u16 pkt_len, u32 band,
 
 		desc_addr = ring_base + idx * 24;
 		host_ring_write_desc(desc_addr, buf_addr, pkt_len, wcid,
-				     amsdu, fwd_type, orig_len, is_last, info);
+				     amsdu, fwd_type, orig_len, is_last, info, band);
 		idx++;
 		REG32(HOSTADPT_RX_DMA_IDX(0)) = (idx < HOSTADPT_RING_SIZE) ? idx : 0;
 		return 0;
@@ -189,7 +222,7 @@ int host_ring_submit(u32 buf_addr, u16 pkt_len, u32 band,
 
 		desc_addr = ring_base + idx * 24;
 		host_ring_write_desc(desc_addr, buf_addr, pkt_len, wcid,
-				     amsdu, fwd_type, orig_len, is_last, info);
+				     amsdu, fwd_type, orig_len, is_last, info, band);
 		idx++;
 		REG32(HOSTADPT_RX_DMA_IDX(1)) = (idx < HOSTADPT_RING_SIZE) ? idx : 0;
 		return 0;
@@ -198,22 +231,19 @@ int host_ring_submit(u32 buf_addr, u16 pkt_len, u32 band,
 		npu_printf("Ring Index error!\n");
 		return -1;
 	}
+#endif
 }
 
 #ifdef HAS_ASYNC_COPY
-/* bridge_dma_copy on channel 3, split at the wait */
+/* Core 3 finishes each copy before processing host TX on the same channel. */
 static inline void host_out_copy(u32 src, u32 dst, u32 len)
 {
-	REG32(DMA_COPY_SRC(3)) = src;
-	REG32(DMA_COPY_DST(3)) = dst;
-	REG32(DMA_COPY_CTRL(3)) = (len << 16) | 0x23;
+	bridge_dma_start(DMA_COPY_HOST_CHANNEL, src, dst, len);
 }
 
 static inline void host_out_wait(void)
 {
-	while (!(REG32(DMA_COPY_STATUS) & 8))
-		;
-	REG32(DMA_COPY_STATUS) = 8;
+	bridge_dma_wait(DMA_COPY_HOST_CHANNEL);
 }
 
 NPU_HOT u32 host_out_idx(void)

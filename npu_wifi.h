@@ -106,6 +106,8 @@ extern u32 tdma_bme_dscp_base_addr;
 
 #ifdef HAS_WIFI
 void bridge_dma_copy(u32 channel, u32 src, u32 dst, u32 len);
+void bridge_dma_start(u32 channel, u32 src, u32 dst, u32 len);
+void bridge_dma_wait(u32 channel);
 int __attribute__((noinline)) tdma_tx_submit(u32 token, u32 pkt_len,
 					     u32 buf_addr, u32 band);
 #endif

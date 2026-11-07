@@ -218,11 +218,53 @@ word 1 function id.
 |   1 | HWNAT_INIT: store the board config, program the PPE | 1            |
 |   2 | HWNAT_DEINIT: undo the PPE setup                    | 1            |
 |   3 | API: PPE table entry write, value write or clear    | 1 on success |
-|   4 | flow statistics setup                               | 0            |
-|   5 | L4S setup, prints `L4S not support!!!`              | 1            |
+|   4 | flow statistics setup (unsupported)                 | 3            |
+|   5 | L4S setup (unsupported)                             | 3            |
 
-A result of 0 prints `hwnat_mail_set_wait_operation fail !`. Details are
-in [tunnel.md](tunnel.md#ppe-and-hwnat).
+Slot 5 is registered on every SoC, including EN7523 and AN7552, with or
+without WiFi. The handler validates the payload address, size and SET
+operation. Unsupported functions return EOPNOTSUPP; table access before
+INIT returns ENODEV. INIT takes 28 bytes, API 20, DEINIT 8.
+
+API words 2/3/4 carry the operation, size and physical data pointer or hash:
+
+| API | Operation | Size |
+| --: | --- | --- |
+| 0 | Stage an entry for PPE1 (AN7581 only) | 80 bytes |
+| 1 | Stage an entry for PPE0 | 80 bytes |
+| 2 | Commit the staged entry at the supplied hash | 4 bytes |
+| 3 | Zero the whole SRAM table | SRAM entry count |
+
+Staging copies into firmware memory, without touching the hardware window.
+Commit validates the hash and PPE bank, fills all twenty window words,
+fences, issues the write command and waits for ACK. Timeout returns ERROR.
+The host holds the mailbox lock across stage and commit. CPU-direct SRAM
+programming remains available when no NPU endpoint supports the operation;
+a mailbox timeout must not trigger a competing CPU window access.
+
+EN7523 and AN7552 have 512 SRAM entries, AN7583 8192, AN7581 16384.
+DRAM FoE entries remain in the host's coherent table. Further register
+setup details are in [tunnel.md](tunnel.md#ppe-and-hwnat).
+
+### PPE model checks
+
+The EN7523 linked-image runtime tests execute slot 5 together with the real
+mailbox and IRQ code. `tests/ppe-mail.py` executes the other SoCs' handlers
+with host-address aliasing, both AN7581 PPE banks, complete table clears
+and ACK timeouts. Build these auxiliary images without compressed
+instructions for the RV32IM interpreter:
+
+```sh
+for soc in AN7552 AN7581 AN7583; do
+    make SOC=$soc WIFI=NOWIFI GITREV=x \
+        ARCH='-march=rv32im_zicsr_zifencei -mabi=ilp32' \
+        BUILD=build/ppe-model/$soc OUTPUT=build/ppe-model all
+done
+python3 tests/ppe-mail.py build/ppe-model
+```
+
+These models validate firmware control flow and register sequencing, not
+PPE forwarding behavior, GDMA cache coherency or performance on silicon.
 
 ## DBA commands (core 5, slot 3)
 

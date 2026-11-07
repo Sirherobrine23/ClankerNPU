@@ -258,7 +258,11 @@
 #define DMA_COPY_SRC(ch)        (DMA_COPY_BASE + (ch) * 16)
 #define DMA_COPY_DST(ch)        (DMA_COPY_BASE + (ch) * 16 + 4)
 #define DMA_COPY_CTRL(ch)       (DMA_COPY_BASE + (ch) * 16 + 8)
+#define DMA_COPY_CTRL1(ch)      (DMA_COPY_BASE + (ch) * 16 + 12)
 #define DMA_COPY_STATUS         (DMA_COPY_BASE + 0x204)
+#define DMA_COPY_COHERENT       4
+#define DMA_COPY_HOST_CHANNEL   0
+#define DMA_COPY_WIFI_CHANNEL   1
 
 /* NPU bridge debug */
 #define NPU_BRIDGE_DBG_BASE     0x1EC12290

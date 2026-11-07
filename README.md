@@ -6,13 +6,20 @@ RV32IM (EN7523) or RV32IMC (AN75xx) harts with no OS and no MMU. Each hart runs 
 they offload WiFi forwarding, tunnel header rewrites and GPON upstream
 scheduling from the ARM host on AN75xx. EN7523 provides core services, mailbox control and an MT7915 receive
 transport for mt76, with one DBDC device or two separate PCIe radios.
-Radio TX and receive reordering remain on the host.
+Firmware 7.10 uses reserved GDMA channels 0/1 for host transfers and
+provides PPE initialization and FoE SRAM programming on every SoC.
+EN7523 firmware 7.11 batches RX notifications. Its OpenWrt profile combines
+NPU RX, host security/reordering, CPU-assisted PPE ingress and WED TX.
+The Askey ingress and return path have been tested on hardware; direct
+PPE-to-WED WiFi egress still needs validation. WED is enabled by default
+in the OpenWrt mt7615, mt7915 and mt7996 drivers, with `wed_enable=0`
+available as an explicit opt-out.
 
 ## Variants
 
 | SoC    | Harts |   SRAM | WiFi chips                           | Extra features           |
 | ------ | ----: | -----: | ------------------------------------ | ------------------------ |
-| EN7523 |     4 | 384 KB | MT7915, none                         | host RX transport        |
+| EN7523 |     4 | 384 KB | MT7915, none                         | GDMA RX, PPE control     |
 | AN7552 |     2 | 256 KB | MT7916, MT7991, MT7993               | none                     |
 | AN7581 |     8 | 480 KB | MT7916, MT7992, MT7996               | tunnel offload, TR-471   |
 | AN7583 |     6 | 512 KB | MT7916, MT7992, MT7993, MT7996, none | tunnel offload, GPON DBA |

@@ -14,26 +14,52 @@
  * DMA copy engine (0x1FB30000)
  *
  * Channel-based hardware copy engine. Each channel has a 16-byte
- * register set: src, dst, ctrl. Channel 3 used for host ring DMA.
+ * register set: src, dst, ctrl0, ctrl1. Only channels 0/1 belong to NPU.
  * ================================================================ */
 
 #ifdef HAS_WIFI
-void bridge_dma_copy(u32 channel, u32 src, u32 dst, u32 len)
+void bridge_dma_init(void)
 {
-#ifdef EN7523
-	(void)channel;
-	npu_memcpy((void *)dst, (void *)src, len);
-#else
-	u32 mask = 1u << channel;
+	u32 ch;
 
+	/* Stop only our channels before any worker or mailbox can submit. */
+	for (ch = 0; ch < 2; ch++) {
+		REG32(DMA_COPY_CTRL1(ch)) = DMA_COPY_COHERENT | 1;
+		REG32(DMA_COPY_CTRL(ch)) = 0;
+		while (REG32(DMA_COPY_CTRL(ch)) & 2)
+			;
+	}
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+	REG32(DMA_COPY_STATUS) = 3;
+}
+
+void bridge_dma_start(u32 channel, u32 src, u32 dst, u32 len)
+{
+	/* Clear stale completion before unmasking this channel. */
+	REG32(DMA_COPY_STATUS) = 1u << channel;
 	REG32(DMA_COPY_SRC(channel)) = src;
 	REG32(DMA_COPY_DST(channel)) = dst;
+	REG32(DMA_COPY_CTRL1(channel)) = DMA_COPY_COHERENT;
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
 	REG32(DMA_COPY_CTRL(channel)) = (len << 16) | 0x23;
+}
+
+void bridge_dma_wait(u32 channel)
+{
+	u32 mask = 1u << channel;
 
 	while (!(REG32(DMA_COPY_STATUS) & mask))
 		;
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
 	REG32(DMA_COPY_STATUS) = mask;
-#endif
+}
+
+void bridge_dma_copy(u32 channel, u32 src, u32 dst, u32 len)
+{
+	if (!len)
+		return;
+	bridge_dma_start(channel, src, dst, len);
+	bridge_dma_wait(channel);
 }
 #endif
 

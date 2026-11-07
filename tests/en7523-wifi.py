@@ -52,7 +52,8 @@ def packet(band, blob, last=True):
     for _ in range(60000):
         tick(1)
         if (not read(desc+4)&0x80000000 and
-                read(symbol('en7523_wifi_index')+band*4) == (index+1)%1536):
+                read(symbol('en7523_wifi_index')+band*4) == (index+1)%1536 and
+                read(symbol('en7523_host_index')+band*4) == read(0x1ec0d188+band*16)):
             break
     else:
         raise AssertionError('WiFi descriptor was not returned')
@@ -128,10 +129,68 @@ load(host[0]+head*24,b'\0'*4)
 # Both producer indices wrap at their actual hardware ring sizes.
 load(symbol('en7523_wifi_index')+4,(1535).to_bytes(4,'little'))
 load(0x1ec0d198,(511).to_bytes(4,'little'))
+load(symbol('en7523_host_index')+4,(511).to_bytes(4,'little'))
 blob=body(128)
 packet(1,blob)
 check_host(1,511,blob,len(blob),1,1,True)
 assert read(symbol('en7523_wifi_index')+4)==0 and read(0x1ec0d198)==0
+
+# Both radio workers can keep independent reserved channels in flight.
+dma_hold.update((0, 1))
+simultaneous = []
+for band in range(2):
+    index = read(symbol('en7523_wifi_index')+band*4)
+    desc = rings[band]+index*16
+    head = read(0x1ec0d188+band*16)
+    blob = body(127+band*64)
+    load(read(desc), blob)
+    load(desc+4, (0xc0000000 | len(blob)<<16).to_bytes(4, 'little'))
+    simultaneous.append((desc, head, blob, index))
+for _ in range(10000):
+    tick(1)
+    if set(dma_pending) == {0, 1}:
+        break
+else:
+    raise AssertionError('RX workers failed to acquire distinct GDMA channels')
+assert dma_peak == 2
+dma_hold.clear()
+for _ in range(10000):
+    tick(1)
+    if all(not read(desc+4)&0x80000000 and
+           read(symbol('en7523_wifi_index')+band*4) == (index+1)%1536 and
+           read(symbol('en7523_host_index')+band*4) == read(0x1ec0d188+band*16)
+           for band, (desc, _, _, index) in enumerate(simultaneous)):
+        break
+else:
+    raise AssertionError('parallel GDMA copies did not finish')
+for band, (_, head, blob, _) in enumerate(simultaneous):
+    check_host(band, head, blob, len(blob), 1, 1, True)
+
+# A continuous burst publishes complete batches, then flushes its short tail.
+band = 1
+set_cmd(2, 0, band)
+index = read(symbol('en7523_wifi_index')+4)
+head = read(0x1ec0d198)
+blobs = [body(96+i) for i in range(37)]
+for i, blob in enumerate(blobs):
+    desc = rings[band]+((index+i)%1536)*16
+    load(read(desc), blob)
+    load(desc+4, (0xc0000000 | len(blob)<<16).to_bytes(4, 'little'))
+before = host_doorbells[band]
+set_cmd(2, 1, band)
+for _ in range(200000):
+    tick(1)
+    if read(0x1ec0d198) == (head+len(blobs))%512:
+        break
+else:
+    raise AssertionError('RX burst failed to flush its short tail')
+assert host_doorbells[band]-before == 2, host_doorbells
+for i, blob in enumerate(blobs):
+    check_host(band, (head+i)%512, blob, len(blob), 1, 1, True)
+before = host_doorbells[:]
+tick(1000)
+assert host_doorbells == before, 'idle workers generated host interrupts'
+print('PASS: 37 RX frames use two host doorbells; idle workers do not notify')
 
 # STOP must also wait for a copy that was already in flight.
 band=0
@@ -141,8 +200,20 @@ blob=body(3500)
 head=read(0x1ec0d188)
 load(read(desc),blob)
 load(desc+4,(0xc0000000 | len(blob)<<16).to_bytes(4,'little'))
+dma_hold.add(0)
 tick(1500)
+assert 0 in dma_pending
 assert read(symbol('en7523_wifi_busy'))==1 and read(desc+4)&0x80000000
+set_cmd(2,0,expected=0)
+assert read(symbol('en7523_wifi_busy'))==1 and read(desc+4)&0x80000000
+assert not read(host[0]+head*24)&1, 'stalled DMA published a host descriptor'
+dma_hold.remove(0)
+for _ in range(60000):
+    tick(1)
+    if not read(desc+4)&0x80000000:
+        break
+else:
+    raise AssertionError('released GDMA did not return the radio buffer')
 set_cmd(2,0)
 check_host(0,head,blob,len(blob),1,1,True)
 assert read(symbol('en7523_wifi_enabled'))==0
@@ -165,4 +236,7 @@ for band in range(2):
     assert read(desc+4)&0x80000000
     assert read(0x1ec0d188+band*16)==host_index
     assert read(symbol('en7523_wifi_busy')+band*4) in (0,1)
+assert all(dma_copies) and not dma_pending
+assert read(0x1fb30204)&0xfc == 0xfc, 'firmware cleared Linux completion bits'
+print('PASS: coherent GDMA channels 0/1, delayed completion, failed STOP pins in-flight storage')
 print('PASS: MT7915 ' + ('split radios ' + str(order) if split else 'DBDC') + ', independent PCIe/host rings, shared pool, raw bytes, fragments, backpressure, index wrap, isolated STOP')

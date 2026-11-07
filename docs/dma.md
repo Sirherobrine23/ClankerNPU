@@ -13,7 +13,7 @@ flowchart LR
   HOST["host driver"]
   FE["frame engine / PPE"]
 
-  Q -->|"host adaptor out ring<br/>DMA copy ch 3"| HOST
+  Q -->|"host adaptor out ring<br/>GDMA ch 0/1"| HOST
   HOST -->|"host adaptor in ring<br/>(HAS_NPU_WIFI_TX)"| Q
   BUF -->|"TDMA tx"| FE
   FE -->|"TDMA rx"| Q
@@ -40,7 +40,7 @@ word 3   host buffer address, filled by the host
 ```
 
 `host_ring_submit` copies the frame into the host buffer with the DMA
-copy engine (channel 3), then writes words 2, 1 and 0, in that order,
+copy engine (channel 0 on AN75xx, queue number on EN7523), then writes words 2, 1 and 0, in that order,
 so the valid bit lands last. The copy is capped at
 1792 bytes on eagle and on parts with `HAS_NPU_WIFI_TX`, 3500 bytes
 otherwise. If the entry two slots ahead is still valid, the ring counts
@@ -70,16 +70,33 @@ them into the tx staging ring.
 
 ## DMA copy engine
 
-`bridge_dma_copy(ch, src, dst, len)` writes source, destination and
-`len << 16 | 0x23`, then spins on the channel's status bit and clears it.
-All addresses are physical.
+`bridge_dma_copy(ch, src, dst, len)` clears the channel's stale DONE bit,
+sets source and destination, and writes CTRL1 = 4 (coherent, unmasked).
+After an I/O fence it writes `len << 16 | 0x23` to CTRL0. It waits for
+DONE, fences again and acknowledges only its own completion bit. Zero-byte
+copies do not start the engine. `bridge_dma_start` and `bridge_dma_wait`
+provide the same sequence for the asynchronous host adaptor path.
+
+Linux reserves channels 0 and 1 through `airoha,npu-gdma` on their DTSI
+child nodes on every ARM SoC. Its GDMA driver skips global reset and does
+not mask, initialize or acknowledge those channels. Channels 2..7 remain
+available to DMAengine. The firmware never resets the shared controller.
+
+On EN7523 hart 1 uses channel 0 and hart 2 uses channel 1 for their own
+host RX rings. On AN75xx the host adaptor worker uses channel 0 for both
+outbound RX and inbound TX copies; it finishes an asynchronous RX copy
+before processing another host TX frame. The WiFi TX worker uses channel
+1. No firmware copy uses channel 3.
+
+A stalled copy keeps its source buffer and destination descriptor owned
+until DONE. EN7523 STOP consequently fails while that worker is busy;
+the mt76 driver retains DMA storage on a failed STOP. The firmware does
+not publish a descriptor or recycle its radio buffer before completion.
 
 The engine is the SoC GDMA (`0x1FB30000`, 16 bytes per channel). Control
 word: bit 0 software mode, bit 1 enable, bits 5:3 burst size, bits
-31:16 length. `0x23` is the largest burst, 64 bytes; values 5 to 7 copy
-nothing and never set the done bit. Channels in use: 0 host tx frame
-and TXD (core 3), 1 TXD into the WiFi tx ring (core 2), 3 host adaptor
-out ring (core 3). Measured on AN7583:
+31:16 length. `0x23` selects the 64-byte burst; values 5 to 7 copy
+nothing and never set the done bit. Measured on AN7583:
 
 | copy                                         |                              cycles |
 | -------------------------------------------- | ----------------------------------: |

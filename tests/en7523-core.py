@@ -23,11 +23,19 @@ uart = bytearray()
 steps = 0
 completed = [0] * 4
 active_irq = [None] * 4
+dma_pending = {}
+dma_hold = set()
+dma_copies = [0, 0]
+dma_peak = 0
+host_doorbells = [0, 0]
+ppe_entries = {}
+ppe_ack = True
 injected = [set() for _ in range(4)]
 class BusWait(Exception):
     pass
 def load(addr, data):
     for i, byte in enumerate(data): mem[addr+i] = byte
+load(0x1fb30204, (0xff).to_bytes(4, 'little'))
 load(0x84000000, image)
 load(0x1e900000, (data if data.exists() else root / 'npu_data.bin').read_bytes())
 # Dirty shared BSS first so the test actually exercises primary initialization.
@@ -40,6 +48,20 @@ load(0x1ec0c194, int(quiet).to_bytes(4, 'little'))
 load(0x1ec08004, (1 if staggered else 15).to_bytes(4, 'little'))
 
 def read(addr, n=4):
+    if addr == 0x1fb30204:
+        for ch, transfer in list(dma_pending.items()):
+            if ch in dma_hold:
+                continue
+            transfer['polls'] += 1
+            if transfer['polls'] < 32:
+                continue
+            load(transfer['dst'], transfer['data'])
+            status = sum(mem.get(addr+i, 0) << (i*8) for i in range(4))
+            load(addr, (status | 1 << ch).to_bytes(4, 'little'))
+            ctrl = 0x1fb30008 + ch * 16
+            load(ctrl, (transfer['ctrl'] & ~2).to_bytes(4, 'little'))
+            dma_copies[ch] += 1
+            del dma_pending[ch]
     assert not 0x0c000000 <= addr < 0x0c300000, hex(addr)
     if addr == 0x1fbf0014:
         return 1 << 5
@@ -52,10 +74,13 @@ def read(addr, n=4):
         return 0 if owner is None else 0x10000 | owner << 8
     return sum(mem.get(addr+i, 0) << (i*8) for i in range(n))
 def write(addr, val, n=4):
+    global dma_peak
     assert not 0x0c000000 <= addr < 0x0c300000, hex(addr)
     assert not 0x840f0000 <= addr < 0x840f3000, 'removed telemetry page accessed'
     if 0x1ec00000 <= addr < 0x20000000:
-        assert ((wifi and (0x1fa90030 <= addr <= 0x1fa9003c or
+        assert (0x1fb50000 <= addr < 0x1fb51000 or addr == 0x1fb51500 or
+                (wifi and (0x1fb30000 <= addr < 0x1fb30020 or addr == 0x1fb30204)) or
+                (wifi and (0x1fa90030 <= addr <= 0x1fa9003c or
                           0x1ec0d180 <= addr <= 0x1ec0d19c)) or 0x1ec09018 <= addr < 0x1ec09098 or
                 0x1ec09098 <= addr < 0x1ec090d8 or
                 0x1ec09118 <= addr < 0x1ec09128 or
@@ -66,6 +91,32 @@ def write(addr, val, n=4):
                 0x1ec0c0b0 <= addr <= 0x1ec0c0bc or
                 addr in (0x1ec0c194, 0x1ec0c1bc, 0x1ec10100, 0x1ec10104,
                          0x1fbf0000)), hex(addr)
+    if addr in (0x1ec0d188, 0x1ec0d198):
+        host_doorbells[(addr-0x1ec0d188)//16] += 1
+    if addr == 0x1fb30204:
+        assert not val & ~3, 'NPU acknowledged a Linux GDMA channel'
+        val = sum(mem.get(addr+i, 0) << (i*8) for i in range(4)) & ~val
+    if addr in (0x1fb30008, 0x1fb30018) and val & 2:
+        ch = (addr - 0x1fb30008) // 16
+        assert ch not in dma_pending, 'GDMA channel reused while active'
+        assert current_hart == ch+1, 'RX harts must use separate reserved channels'
+        assert read(0x1fb3000c+ch*16) == 4, 'GDMA must be coherent and unmasked'
+        assert not read(0x1fb30204) & 1 << ch, 'stale GDMA completion'
+        src, dst, length = read(addr-8), read(addr-4), val >> 16
+        assert val & 0xffff == 0x23 and 0 < length <= 3500
+        dma_pending[ch] = dict(src=src, dst=dst, ctrl=val, polls=0,
+                               data=bytes(read(src+i, 1) for i in range(length)))
+        dma_peak = max(dma_peak, len(dma_pending))
+    if addr == 0x1fb50f1c and val & 1 and ppe_ack:
+        index = val >> 8 & 0xffff
+        assert index < 512, 'EN7523 SRAM table overrun'
+        ppe_entries[index] = tuple(read(addr+4+i*4) for i in range(20))
+        val |= 0x80000000
+    if wifi:
+        for band in range(2):
+            host = read(0x1ec0d180+band*16)
+            if host and host <= addr < host+512*24 and (addr-host) % 24 == 0 and val & 1:
+                assert band not in dma_pending, 'host descriptor published before DMA completion'
     if 0x1ec09b00 <= addr < 0x1ec09c00:
         ident = (addr - 0x1ec09b00) // 4
         owner = mutex_owner.get(ident)
@@ -199,8 +250,6 @@ class Hart:
         else:raise AssertionError((hex(pc),hex(w)))
         self.r=[v&MASK for v in r];self.r[0]=0;self.pc=nxt&MASK
 
-if wifi:
-    exec((Path(__file__).parent / 'en7523-memcpy.py').read_text())
 harts=[Hart(i) for i in range(4)]
 def tick(n):
     global steps
@@ -244,7 +293,7 @@ if quiet:
 else:
     assert 'bite my shiny metal NPU' in console
     assert 'core freq at 500 MHz' in console
-    assert ('NPU Version: TLB7.' + ('9' if wifi else '8') + '.0.0_v003.' + ('MT7915.' if wifi else 'NOWIFI.')) in console
+    assert ('NPU Version: TLB7.' + '10' + '.0.0_v003.' + ('MT7915.' if wifi else 'NOWIFI.')) in console
     assert 'cores enabled f, running f' in console
     assert 'Error:' not in console
     for hart in range(4):
@@ -275,7 +324,7 @@ for ptr in (0x85012000, 0x8a004000):
     assert read(ptr+12)==0x12345678, 'response exceeded SDK payload'
     for ifindex in (0, 3, 15):
         control,version=request(cmd=10, ptr=ptr, ifindex=ifindex)
-        assert control&0x1e==6 and version==(0x00070009 if wifi else 0x00070008)
+        assert control&0x1e==6 and version==0x0007000b
         assert read(ptr)==0x30|ifindex and read(ptr+4)==10
         assert read(ptr+12)==0x12345678, 'version exceeded its response word'
 # Wire values must match the host enum, not Linux's negative errno numbers.
@@ -325,7 +374,7 @@ for kwargs, expected in (({},1), (dict(cmd=10),1), (dict(ptr=0),EINVAL),
     before=read(0x1ec0c0b8)
     _,info=request(arg=0,**kwargs)
     if kwargs.get('cmd')==10:
-        assert info==(0x00070009 if wifi else 0x00070008)
+        assert info==0x0007000b
     assert read(0x1ec0c0b0)==0
     assert read(0x1ec0c0b4)==expected
     assert read(0x1ec0c0b8)==before+1 and not mutex_owner
@@ -345,6 +394,7 @@ for src in (0,127):
     injected[3].add(src);tick(1000)
     assert not read(addr)&1<<(src&31)
 assert completed[3]==2
+exec((Path(__file__).parent / 'en7523-ppe.py').read_text())
 if wifi:
     exec((Path(__file__).parent / 'en7523-wifi.py').read_text())
 # Inject a real exception into the model; no firmware fault-injection opcode exists.

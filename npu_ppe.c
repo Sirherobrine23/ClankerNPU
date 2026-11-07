@@ -13,8 +13,6 @@
 #include "npu_internal.h"
 
 
-#ifdef HAS_TUNNEL
-
 /* PPE register bases for tunnel offload */
 #define PPE0_CTRL       0x1FB50E00
 #define PPE0_CTRL2      0x1FB50E04
@@ -227,6 +225,8 @@ static void ppe_ip_check_init(u32 blacklist)
 {
 	u32 chip_rev = CHIP_FAMILY;
 
+	npu_printf("PPE IP chip_rev %d, blacklist %d\n", chip_rev, blacklist);
+
 	REG32(PPE0_IPCHK0) = 0;
 	REG32(PPE0_IPCHK1) = 0;
 	REG32(PPE0_IPCHK2) = 0;
@@ -405,7 +405,11 @@ static void ppe_tb_sel(u32 sel)
 /* Table size, bits 26:24 of the table config: 1024 << n entries. On
  * AN7581 the table spans both PPEs' SRAM, 16384 entries, as the stock
  * image has it; PPE1's entries are 0x2000 and up. */
-#if defined(AN7581)
+#if defined(EN7523) || defined(AN7552)
+#define PPE_TB_SIZE		0x7000000
+#define PPE_TB_ENTRIES		512
+#define PPE_TB_SIZE_PPE1	0
+#elif defined(AN7581)
 #define PPE_TB_SIZE		0x4000000
 #define PPE_TB_SIZE_PPE1	0x3000000
 #define PPE_TB_ENTRIES		0x4000
@@ -569,6 +573,7 @@ void tunnel_init(void)
 {
 	u32 i, chip_rev;
 
+#ifdef HAS_TUNNEL
 	npu_memset(tunnel_ctx, 0, sizeof(tunnel_ctx));
 
 	for (i = 0; ; i++) {
@@ -587,6 +592,9 @@ void tunnel_init(void)
 	chip_cap_query(i, 3);
 	chip_cap_query(i, 4);
 	chip_cap_query(i, 5);
+#else
+	(void)i;
+#endif
 
 	chip_rev = CHIP_FAMILY;
 
@@ -766,8 +774,10 @@ static void hwnat_set_wait_init(u32 addr)
 	hwnat_ppe_type = REG32(addr + 16);
 	hwnat_wan_mode = REG32(addr + 20);
 	hwnat_ae_wan_sel = REG32(addr + 24);
-	hwnat_ready = 1;
 	tunnel_init();
+	hwnat_sram_pending = 0;
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+	hwnat_ready = 1;
 }
 
 static void ppe_ctrl_off(u32 ctrl)
@@ -801,6 +811,9 @@ static void ppe_misc_off(u32 misc)
 static void hwnat_deinit(void)
 {
 	u32 fam;
+
+	hwnat_ready = 0;
+	hwnat_sram_pending = 0;
 
 	ppe_qdma_config(0);
 	ppe_foe_pause(0);
@@ -840,157 +853,158 @@ static void hwnat_deinit(void)
 		ppe_misc_off(PPE1_MISC);
 }
 
-/* copy one 80-byte FOE entry into a PPE entry window */
-static int sram_set_entry(u32 size, u32 src, u32 win)
+/* SDK API 0/1 stage an entry; API 2 commits it with its hash. */
+static int sram_set_entry(u32 size, u32 src, u32 ppe)
 {
-	u32 i;
+	u32 addr, i;
 
-	if (size != 80) {
-		npu_printf("%s [ERROR] expected data_size is %d, now data_size is %d\n",
-			   "sram_set_entry", 80, size);
-		return 0;
-	}
-	src = (src & 0x3FFFFFFF) | NPU_ADDR_MASK;
-	for (i = 0; i < 80; i += 4)
-		REG32(win + i) = REG32(src + i);
-	return 1;
+	hwnat_sram_pending = 0;
+	if (size != 80 || (src & 3) || src < 0x80000000 ||
+	    src > 0xc0000000 - 80)
+		return NPU_MBOX_EINVAL;
+#ifndef AN7581
+	if (ppe)
+		return NPU_MBOX_EOPNOTSUPP;
+#else
+	if (ppe && !(REG32(PPE1_CTRL) & 1))
+		return NPU_MBOX_ENODEV;
+#endif
+#ifdef EN7523
+	addr = src;
+#else
+	addr = (src & 0x3fffffff) | NPU_ADDR_MASK;
+#endif
+	for (i = 0; i < 20; i++)
+		hwnat_sram_entry[i] = REG32(addr + i * 4);
+	hwnat_sram_pending = ppe + 1;
+	return NPU_MBOX_SUCCESS;
 }
 
-/* issue a table command and wait up to 10 reads for bit 31 */
-static void ppe_tbl_cmd(u32 reg, u32 cmd)
+static int ppe_tbl_cmd(u32 reg, u32 cmd)
 {
 	u32 n;
 
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
 	REG32(reg) = cmd;
-	for (n = 10; n != 0; n--)
-		if ((s32)REG32(reg) < 0)
-			break;
+	for (n = 0; n < 1000; n++) {
+		if (REG32(reg) & 0x80000000) {
+			__asm__ volatile("fence iorw, iorw" ::: "memory");
+			return NPU_MBOX_SUCCESS;
+		}
+	}
+	return NPU_MBOX_ERROR;
+}
+
+static u32 ppe_sram_bank(u32 idx)
+{
+#ifdef AN7581
+	if (idx >= 0x2000 && (REG32(PPE1_CTRL) & 1))
+		return 1;
+#endif
+	return 0;
 }
 
 static int sram_set_entry_value(u32 size, u32 idx)
 {
-	u32 cmd = ((idx << 8) & 0xFFFF00) | 3;
+	u32 bank, win, i;
 
-	if (size != 4) {
-		npu_printf("%s [ERROR] expected data_size is %d, now data_size is %d\n",
-			   "sram_set_entry_value", 4, size);
-		return 0;
-	}
-	if (CHIP_FAMILY == 14 && (REG32(PPE1_CTRL) & 1) && idx >= 0x2000)
-		ppe_tbl_cmd(0x1FB51F1C, cmd);
-	else
-		ppe_tbl_cmd(0x1FB50F1C, cmd);
-	return 1;
+	if (size != 4 || idx >= PPE_TB_ENTRIES)
+		return NPU_MBOX_EINVAL;
+	bank = ppe_sram_bank(idx);
+	if (hwnat_sram_pending != bank + 1)
+		return NPU_MBOX_ENODEV;
+	hwnat_sram_pending = 0;
+	win = 0x1fb50f20 + bank * PPE1_OFFSET;
+	for (i = 0; i < 20; i++)
+		REG32(win + i * 4) = hwnat_sram_entry[i];
+	return ppe_tbl_cmd(win - 4, (idx << 8) | 3);
 }
 
 static int sram_set_entry_to_zero(u32 size)
 {
-	u32 i;
+	u32 idx, i, bank, win, previous = ~0u;
+	int ret;
 
-	if (size != PPE_TB_ENTRIES) {
-		npu_printf("%s [ERROR] expected data_size is %d, now data_size is %d\n",
-			   "sram_set_entry_to_zero", PPE_TB_ENTRIES, size);
-		return 0;
-	}
-	for (i = 0; i < PPE_TB_ENTRIES; i++) {
-#if defined(AN7581)
-		if (CHIP_FAMILY == 14 && (REG32(PPE1_CTRL) & 1) && i >= 0x2000) {
-			REG32(0x1FB51F20) = 0;
-			ppe_tbl_cmd(0x1FB51F1C, (i << 8) | 3);
-			continue;
+	if (size != PPE_TB_ENTRIES)
+		return NPU_MBOX_EINVAL;
+	hwnat_sram_pending = 0;
+	for (idx = 0; idx < PPE_TB_ENTRIES; idx++) {
+		bank = ppe_sram_bank(idx);
+		win = 0x1fb50f20 + bank * PPE1_OFFSET;
+		if (bank != previous) {
+			for (i = 0; i < 20; i++)
+				REG32(win + i * 4) = 0;
+			previous = bank;
 		}
-#else
-		if (CHIP_FAMILY == 14)
-			(void)REG32(PPE1_CTRL);
-#endif
-		REG32(0x1FB50F20) = 0;
-		ppe_tbl_cmd(0x1FB50F1C, (i << 8) | 3);
+		ret = ppe_tbl_cmd(win - 4, (idx << 8) | 3);
+		if (ret != NPU_MBOX_SUCCESS)
+			return ret;
 	}
-	return 1;
+	return NPU_MBOX_SUCCESS;
 }
 
-/* HWNAT_API: _hwnat_set_func_id at +8, data_size +12, data +16 */
+/* HWNAT_API: function at +8, data size +12, pointer or hash +16. */
 static int hwnat_set_wait_api(u32 addr)
 {
 	u32 size = REG32(addr + 12), data = REG32(addr + 16);
-	int ret;
 
+	if (!hwnat_ready)
+		return NPU_MBOX_ENODEV;
 	switch (REG32(addr + 8)) {
-	case 0:			/* PPE2_SRAM_SET_ONE_ENTRY */
-		ret = sram_set_entry(size, data, 0x1FB51F20);
-		break;
-	case 1:			/* SRAM_SET_ONE_ENTRY */
-		ret = sram_set_entry(size, data, 0x1FB50F20);
-		break;
+	case 0:
+		return sram_set_entry(size, data, 1);
+	case 1:
+		return sram_set_entry(size, data, 0);
 	case 2:
-		ret = sram_set_entry_value(size, data);
-		break;
+		return sram_set_entry_value(size, data);
 	case 3:
-		ret = sram_set_entry_to_zero(size);
-		break;
+		return sram_set_entry_to_zero(size);
 	default:
-		ret = 0;
-		break;
+		return NPU_MBOX_EOPNOTSUPP;
 	}
-	if (ret != 1) {
-		npu_printf("%s fail\n", "hwnat_mail_set_wait_hwnat_api");
-		return 0;
-	}
-	return 1;
 }
 
 int hwnat_mail_dispatch(u32 base, u32 cnt)
 {
-	u32 addr = (base & 0x3FFFFFFF) | NPU_ADDR_MASK;
-	u32 func_type = *(volatile u32 *)addr;
-	u32 func_id;
+	u32 addr, func_id;
 	int result;
 
-	(void)cnt;
-	if (func_type != 1) {
-		u32 i;
-
-		npu_printf("not support unknow funcType\n");
-		for (i = 0; i < 7; i++)
-			npu_printf("Offset: %08zx, Value: 0x%08x\n",
-				   i * 4, *(volatile u32 *)(addr + i * 4));
-		return 0;
-	}
-
-	func_id = *(volatile u32 *)(addr + 4);
-	if (func_id < 1 || func_id > 5) {
-		npu_printf("Error: invalid funcId! hwnat_mail_data->funcType=%u hwnat_mail_data->funcId=%u\n",
-			   func_type, func_id);
-		return 0;
-	}
-
+	if ((base & 3) || base < 0x80000000 || base >= 0xc0000000 ||
+	    cnt < 8 || cnt > 0xc0000000 - base)
+		return NPU_MBOX_EINVAL;
+#ifdef EN7523
+	addr = base;
+#else
+	addr = (base & 0x3fffffff) | NPU_ADDR_MASK;
+#endif
+	if (REG32(addr) != 1)
+		return NPU_MBOX_EINVAL;
+	func_id = REG32(addr + 4);
 	switch (func_id) {
-	case 1:			/* HWNAT_INIT */
+	case 1:
+		if (cnt < 28 || REG32(addr + 16) < 1 ||
+		    REG32(addr + 16) > 3)
+			return NPU_MBOX_EINVAL;
 		hwnat_set_wait_init(addr);
-		result = 1;
+		result = NPU_MBOX_SUCCESS;
 		break;
-	case 2:			/* HWNAT_DEINIT */
+	case 2:
 		hwnat_deinit();
-		result = 1;
+		result = NPU_MBOX_SUCCESS;
 		break;
-	case 3:			/* API */
+	case 3:
+		if (cnt < 20)
+			return NPU_MBOX_EINVAL;
 		result = hwnat_set_wait_api(addr);
 		break;
-	case 4:			/* FLOW_STATS_SETUP, not implemented */
-		result = 0;
-		break;
-	default:		/* L4S_SETUP */
-		npu_printf("L4S not support!!!\n");
-		result = 1;
+	case 4:
+	case 5:
+	default:
+		result = NPU_MBOX_EOPNOTSUPP;
 		break;
 	}
-
 	NDBG_CNT(NC_PPE_MAILS);
-	NDBG_SET(NC_PPE_LAST, func_id << 8 | (result & 0xFF));
-	NDBG_TRACE(NDBG_PPE, func_id, result, *(volatile u32 *)(addr + 8));
-	if (result == 0)
-		npu_printf("hwnat_mail_set_wait_operation fail !\n");
+	NDBG_SET(NC_PPE_LAST, func_id << 8 | (result & 0xff));
+	NDBG_TRACE(NDBG_PPE, func_id, result, cnt);
 	return result;
 }
-
-#endif /* HAS_TUNNEL */

@@ -1,4 +1,4 @@
-/* EN7523 MT7915 receive transport; radio TX and reorder stay on the host. */
+/* EN7523 MT7915 receive transport; WED may own TX, reorder stays on the host. */
 #include "npu_internal.h"
 #include "npu_wifi.h"
 
@@ -8,6 +8,7 @@
 #define RX_BYTES	3500
 #define RX_DONE		0x80000000
 #define RX_LAST		0x40000000
+#define RX_BATCH	32
 
 extern volatile u32 en7523_wifi_ready;
 extern volatile u32 en7523_wifi_enabled[2];
@@ -167,7 +168,7 @@ int en7523_wifi_get(u32 *msg)
 	return NPU_MBOX_SUCCESS;
 }
 
-static void en7523_wifi_rx(u32 band)
+static int en7523_wifi_rx(u32 band)
 {
 	u32 idx = en7523_wifi_index[band];
 	volatile u32 *desc = (volatile u32 *)(en7523_wifi_ring[band] + idx * 16);
@@ -175,7 +176,7 @@ static void en7523_wifi_rx(u32 band)
 	u8 flags;
 
 	if (!(ctrl & RX_DONE))
-		return;
+		return 0;
 	wifi_fence();
 	buf = desc[0];
 	len = (ctrl >> 16) & 0x3fff;
@@ -200,17 +201,24 @@ static void en7523_wifi_rx(u32 band)
 	wifi_fence();
 	REG32(en7523_wifi_regs[band] + 8) = idx;
 	en7523_wifi_index[band] = idx + 1 == RX_DESCS ? 0 : idx + 1;
+	return 1;
 }
 
 void en7523_wifi_rx_loop(u32 band)
 {
+	u32 i;
+
 	npu_dbg_loop(NDBG_TAG('W', 'R', 'X', '0') + band);
 	while (1) {
 		npu_dbg_poll();
 		en7523_wifi_busy[band] = 1;
 		wifi_fence();
-		if (en7523_wifi_enabled[band])
-			en7523_wifi_rx(band);
+		if (en7523_wifi_enabled[band]) {
+			for (i = 0; i < RX_BATCH; i++)
+				if (!en7523_wifi_rx(band))
+					break;
+			hostadpt_rx_flush(band);
+		}
 		wifi_fence();
 		en7523_wifi_busy[band] = 0;
 	}

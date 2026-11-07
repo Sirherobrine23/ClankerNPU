@@ -673,6 +673,9 @@ void npu_init(void)
 		plic_register_isr(22, uart_rx_isr);
 #endif
 		timer_init(0, 1, 10);
+#ifdef HAS_WIFI
+		bridge_dma_init();
+#endif
 		mailbox_init();
 	}
 

@@ -18,12 +18,13 @@ The OpenWrt integration adapts patches 173/174 from `airoha_npu_v2`. It builds
 
 ```dts
 airoha,npu-rx-abi = "clanker-kite-24";
+airoha,npu-wed-tx;
 airoha,npu-driver-model = <1>;
 airoha,npu-port-type = <1>;
 ```
 
 `npu_enable=0` keeps mt7915e on its ordinary receive path. When selected, the
-transport excludes WED and requires a little-endian EN7523 with single-HIF
+transport requires a little-endian EN7523 with single-HIF
 MT7915 devices. It checks the normal version query and firmware ring
 availability before publishing DMA storage. It uses the normal NPU provider probe, without demand-start or
 an Ethernet startup call.
@@ -57,12 +58,19 @@ Hart 1 drains band 0; hart 2 drains band 1 and services the common timer.
 Each worker copies received bytes to its host ring, then returns the radio
 descriptor with a 3500-byte buffer and publishes its CPU index. Hart 3 stays
 in the common idle loop. This path does not use TDMA, BME, hardware BMGR or
-the AN75xx bridge. Host copies use ordinary uncached memory accesses with
-the existing v1 boot mapping.
+the AN75xx bridge. Firmware 7.10 copies raw bytes with coherent GDMA: channel 0 for queue 0,
+channel 1 for queue 1. The two workers never share an active channel.
+CPU descriptor accesses retain the v1 uncached boot mapping.
 
-The host receives raw MT7915 RX headers and payloads. The radio TX queues,
-TX completion, firmware control, BA reorder, PN checks and checksum validation
-remain with mt76/mac80211. This is an RX transport, not PPE acceleration.
+Firmware 7.11 drains up to 32 descriptors before publishing the host producer
+index. A short burst is flushed immediately when the radio ring empties.
+Idle workers do not write doorbells. STOP waits through the final publication.
+
+The host receives raw MT7915 RX headers and payloads. Firmware control,
+BA reorder, PN checks and checksum validation remain with mt76/mac80211. The slot-5 control path initializes the PPE and commits 80-byte FoE
+entries for the host Ethernet driver. Raw WiFi frames still reach host
+reorder and PN validation; this does not bypass mac80211 or implement a
+direct raw-WiFi-to-PPE forwarding path.
 
 ## Host descriptor and control
 
@@ -86,7 +94,9 @@ The driver copies completed fragments into an skb before clearing Done.
 The supported SET IDs are PCIE_ADDR (0), DESC (1), NPU_INIT_DONE (2),
 DRIVER_MODEL (5), PKT_BUF_ADDR (8), IS_FORCE_TO_CPU (12, value 1 only) and
 PCIE_PORT_TYPE (14). Supported GETs are NPU_INFO (0), RXDESC_BASE (4) and
-NPU_VERSION (10). BA, TX and PPE commands return EOPNOTSUPP.
+NPU_VERSION (10). WLAN BA, TX and HWNAT command 30 remain unsupported.
+PPE initialization and FoE table operations use the normal slot-5 HWNAT
+mailbox instead, including on the NOWIFI image; see [mailbox.md](../mailbox.md).
 
 The host prepares its radio rings, publishes all host rings owned by that
 device and only then sends NPU_INIT_DONE=1 for each queue. Separate radios
@@ -108,9 +118,14 @@ python3 tests/en7523-core.py build/EN7523_MT7915 --split --reverse --quiet --sta
 python3 tests/en7523-core.py build/EN7523_NOWIFI --quiet --staggered
 ```
 
-The linked-image model checks two-band RX, raw byte preservation, fragmented
+The linked-image model delays GDMA completion, checks channel ownership
+and descriptor publication, and verifies that a failed STOP retains its
+in-flight buffers. It also checks PPE initialization, the 512-entry SRAM
+and 16K DRAM geometry, FoE staging, bounds, ACK timeout and table clear.
+It checks two-band RX, raw byte preservation, fragmented
 frames, descriptor ownership, ring wrapping and STOP, in addition to the
-common boot/IRQ tests. The model does not validate PCIe window routing,
+common boot/IRQ tests. A 37-frame burst must use two producer doorbells,
+with no idle notifications. The model does not validate PCIe window routing,
 interrupt timing or throughput on silicon.
 Split-radio runs start each queue with the other host ring absent, repeat
 the shared pool configuration without reallocating IDs and verify that
@@ -143,9 +158,9 @@ DBDC path is covered by the linked-image regression test. The cycle-counter
 enable must precede secondary-hart startup delays; enabling it later leaves the RX workers stuck before their loops.
 Long-duration throughput, stress and recovery testing remain open.
 
-EN7523 copies aligned packet buffers with unrolled 32-bit loads and stores,
-followed by word and byte tails. Unaligned callers use byte copies. The
-linked-image tests cover all source/destination alignments, zero lengths,
+The earlier CPU-copy transport copied aligned buffers with unrolled 32-bit loads and stores,
+followed by word and byte tails. Unaligned callers use byte copies. The earlier
+linked-image checks covered all source/destination alignments, zero lengths,
 block boundaries and guards around packet-sized buffers.
 
 On the same XX230v and Galaxy A15, a 30-second phone-to-router TCP test
@@ -163,3 +178,221 @@ at the receivers with the optimized firmware. Sender TCP retransmissions
 were 34 and 99 respectively. The WAN upload improvement is about 5.3 times
 the original result; the download remained close to its earlier measurement.
 These are single hardware trials, not controlled RF benchmarks.
+
+Earlier CPU-copy measurements describe firmware 7.8/7.9.
+The later 7.11 Askey follow-up below confirms boot and RX operation,
+but does not establish accelerated forwarding or its CPU benefit.
+
+## Hybrid NPU RX and WED TX
+
+The `airoha,npu-wed-tx` boolean requests the EN7523 transmit-only WED provider
+alongside NPU RX. The Askey and XX230v profiles enable it. Without the flag,
+NPU RX retains host TX. `npu_enable=0` disables NPU RX and its DT request. WED is enabled by
+default for supported mt7615, mt7915 and mt7996 devices when a WED provider
+is available. `wed_enable=0` explicitly disables WED, including this hybrid
+profile, while preserving NPU RX. WED owns transmit and
+TX-free rings; the NPU owns data receive rings, which are excluded from the
+WED interrupt mask. Host BA reordering remains enabled for this transport
+when WED is attached.
+
+OpenWrt enables `CONFIG_NET_AIROHA_WHNAT` on EN7523. After host reorder,
+PN validation and mac80211 processing, the WHNAT hook offers eligible IPv4
+frames to LAN QDMA/PPE with a private vif tag. Unbound frames return to the
+original vif below that hook, so they do not loop. The tag is removed before
+PPE flow learning. GPON QDMA1 packets cannot enter this return path.
+Existing flowtable policy decides which connections become hardware flows.
+Bound upstream traffic leaves through its programmed GDM port. Bound
+WiFi egress uses the WED path, including PCIe index, band, BSS and WCID.
+EN7523 does not use the EN7580 CPU-egress metadata fallback.
+
+This is a CPU-assisted RX path: it retains the host copy, reorder and security
+checks, plus QDMA submission/completion. It removes routing/NAT and host TX
+work for eligible bound forwarding traffic; it does not eliminate per-packet
+CPU work. Router-local traffic, IPv6 on the WHNAT ingress hook, GSO and tagged
+input keep their software path. Higher throughput or lower CPU/IRQ load must
+be measured on hardware with matching firmware, kernel and mt76 images.
+
+For a later RAM test, enable the OpenWrt firewall hardware flowtable, run a
+forwarded LAN/GPON iperf test, and compare IRQ deltas, CPU softirq and mt76 TX
+worker load. Check `/sys/module/airoha_eth/parameters/whnat_handed` and
+`whnat_returned`, WED debugfs state, and `/sys/kernel/debug/ppe/flows`.
+A software `BND` entry with `hash=ffff` is still pending; a valid hardware hash
+and hardware packet counters are required to claim acceleration.
+
+### Askey 7.11 follow-up: PPE readiness gate
+
+A notebook test reported 267 Mbit/s upload and 486 Mbit/s download at the
+receivers through `172.16.0.1`. The attached one-second `top` capture had two
+traffic phases in that order. Their mean idle percentages were 30.9 and
+27.3; softirq was 42.2% in the first phase, while system time was 44.4% in
+the second. The capture lacks timestamps for exact iperf synchronization.
+
+A read-only port1 inspection confirmed firmware 7.11, two NPU RX consumers,
+WED0/WED1 registration and enabled firewall hardware flow offload. However,
+PPE debugfs reported `offload_setup_done=0`; WHNAT counters were
+`handed=0`, `returned=0` and `fallback=1012607`. Thus the intended ingress
+acceleration was blocked despite successful initialization messages.
+
+The host kernel now publishes PPE readiness after successful NPU setup,
+hardware initialization and provider publication. Error paths retain the
+blocked state. A regression harness executing the actual setup function
+reproduced the old failure and checked NPU success, init/wait/stats errors,
+unsupported-NPU fallback and repeated CPU-direct initialization.
+The RAM boot with the readiness fix set that flag correctly but exposed
+the CPU-origin RX lookup failure described below.
+
+That boot also logged `PPE0 SRAM size mismatch: wrote 7, read 6` and a
+startup WED status `0x00080000` on each device. These observations remain
+open for hardware validation; the readiness fix does not resolve or
+reinterpret them. Hardware-bound flow hashes and traffic counters must be
+checked during the next test before claiming PPE/WED acceleration.
+
+### CPU-origin return and DHCP recovery
+
+On the next Askey boot the phone authenticated and associated, but could
+not obtain an address. WHNAT handed and completed 23 frames while returning
+none. Temporarily disabling `whnat_enable` restored DHCP without a radio
+restart; dnsmasq acknowledged `192.168.1.110` to the phone.
+
+The modern QDMA RX path resolved a physical GDM before examining the WHNAT
+return tag. EN7523 source port 0 (CPU/CDM1) is not a physical ingress and
+was rejected at that stage. The corrected lookup borrows the GDM1 netdev
+only for CPU-origin frames on LAN QDMA0 while WHNAT is active, then the
+existing return handler removes the private tag and restores the vif.
+WAN QDMA1 and the existing physical-source mapping retain their behavior.
+Broadcast and multicast frames now bypass the WHNAT ingress hook, keeping
+DHCP discovery and other control traffic on the ordinary host path.
+
+Regression harnesses executing the real lookup and WHNAT functions reproduce
+the old lookup failure and check LAN/WAN isolation, disabled state, missing
+GDM/vif, physical port mapping, tag removal, packet preservation and
+broadcast/multicast exclusion. The follow-up below validates this return path with WHNAT enabled on the
+Askey. It does not validate accelerated WiFi egress.
+
+### Askey return-path validation and remaining WiFi egress work
+
+The user booted the return-path fix and repeated the notebook test on
+2026-11-07. Receiver rates were 373 Mbit/s upload and 516 Mbit/s download,
+compared with 267 and 486 Mbit/s previously. These are individual RF trials.
+In the stable traffic phases of the 33-sample `top -d1` capture, mean CPU
+busy time was approximately 65.6% and 70.9%. Softirq averaged 46.7% in the
+first phase; system time averaged 47.0% in the second. The capture lacks
+precise timestamps for synchronization with iperf.
+
+Read-only port1 inspection found WHNAT enabled, PPE readiness set, 864878
+handed/completed frames, 19269 host returns and no submission fallbacks.
+Notebook-origin flows now had valid hardware indices. This confirms the
+CPU-origin return lookup and control-traffic recovery on the running board.
+These cumulative counters include background traffic, not just iperf.
+
+A further 15-second reverse iperf was run from the same notebook route
+(`192.168.1.153` over `wlan0`). During that transfer, the notebook-to-server
+flow had hardware slot `00b4` in BIND state. Its reverse data flow from
+`172.16.0.1:5201` to `172.16.0.11:39922` remained UNBIND at slot `00e8`,
+with no corresponding reverse flow in the software offload listing.
+The WiFi TX worker remained active. This establishes a remaining failure
+to install/bind the tested PPE-to-WED egress flow; WED registration and
+ring movement alone are not proof of direct hardware forwarding.
+The next investigation is reverse-flow creation and the WiFi forwarding
+path. No new driver change or router restart was made for this measurement.
+
+### WED defaults and PR #89
+
+The OpenWrt mt76 package enables WED by default in mt7615, mt7915 and
+mt7996. Existing hardware/provider checks remain in force, and the boolean
+`wed_enable=0` module parameter remains an explicit opt-out. The EN7523
+NPU hybrid profile still requires `airoha,npu-wed-tx` to allow shared WED
+TX and NPU RX ownership; that property does not override `wed_enable=0`.
+
+Patch 180 from idiazraz's OpenWrt PR #89 is included with its attribution.
+It configures MT7916 CTXD for WED rings 18/19 and enables TX flow control
+inside the WED startup branch. It does not program these MT7916 registers
+on the Askey/XX230v MT7915 devices. The patch was reviewed at PR head
+`6eab09890c801d6010d84d3c694475abc13bb0d1`.
+
+PR patch 181 is a different receive transport: it targets MT7916 and stock
+EN7523 V1 firmware with 16-byte host descriptors, no host reorder for frames
+forwarded by the NPU, and different mailbox/ring ownership. It cannot be
+stacked over this MT7915 ClankerNPU 24-byte transport. The existing Clanker
+RX, PN checks, reordering and reserved GDMA channels remain in use.
+
+These changes do not establish a fix for the Askey reverse flow remaining
+UNBIND. The Askey already attached WED through its hybrid DT profile.
+New MT7916 behavior and the new default policy require hardware validation.
+
+### Askey WED-default image measurement
+
+The user booted `askey_rtf8225vw-initramfs-kernel-wed-default.bin`; the
+port1 boot log `2026/11/07/10-30-55_1794058255.log` confirms the filename,
+firmware 7.11, both NPU consumers and WED providers. Runtime inspection
+confirmed `mt7915e.wed_enable=Y`, `offload_setup_done=1`, 301113 handed
+and completed frames, 3212 returns and no submission fallback. The existing
+startup WED status `0x00080000` and SRAM size readback warning persisted.
+
+User iperf receiver rates were 314/391 Mbit/s upload/download, compared
+with 373/516 Mbit/s in the preceding trial. The supplied 29-sample top
+capture averaged approximately 52.1% and 53.7% aggregate CPU busy time in
+its two traffic phases. These are lower throughputs and lower CPU load;
+they do not demonstrate an efficiency gain or identify the cause of the
+throughput drop. Capture timestamps do not align the phases precisely.
+
+A repeat from the same notebook route measured 329.5/403.0 Mbit/s over
+15 seconds per direction. During the reverse transfer, the upstream ACK
+flow was BIND at hardware slot `0025`, while the reverse data flow to
+`172.16.0.11:46302` remained UNBIND at slot `0138`. It still had no reverse
+software offload entry. Another ten-second download measured 406.8 Mbit/s;
+per-core `/proc/stat` deltas averaged 65.5% busy on CPU0 and 36.2% on CPU1.
+These samples do not establish sustained single-core saturation.
+
+The notebook reported HE 2-stream, 80 MHz, 1200.9 Mbit/s PHY rates and
+-36 dBm in the contemporaneous host snapshot; those are not payload rates.
+The MT7916-only CTXD branch is not run on this MT7915 board. WED default
+activation is now verified on Askey, but the reverse flow creation/binding
+issue remains open. No offload settings, driver code or router boot state
+were changed during this measurement.
+
+
+### Wireless SDK cross-check and WDMA forward-path repair
+
+The supplied `sdk_wireless/mt_wifi/os/linux/plug_in` directory was used as
+read-only reference. `whnat/woe_main.c` separates ring initialization from
+TX tuple registration (`whnat_wlan_tx` calls `wifi_tx_tuple_add`).
+`whnat/woe_hw.c` documents the WED/WDMA enable sequence and preservation of
+RX INFO1/2/3 metadata. `warp_proxy/warp_proxy.c` supplies BSS index, local
+DBDC ring and WCID; its MT7915 chip adapter initializes CT TXD/TXP buffers.
+The current WED/mt76 implementation already covers these basic mechanisms.
+The supplied directory declares and calls `wifi_tx_tuple_add` but does not
+contain its implementation; it is not a complete Airoha PPE binding source.
+
+On the running Askey, firewall rules had been generated before the AP was
+added: the active flowtable contained LAN ports and `pon0`, but omitted
+`phy1-ap0`. Regenerating the existing rules included that interface. After
+a firewall reload, a 15-second reverse transfer still measured 388.4 Mbit/s
+and remained UNBIND, with only the upstream ACK flow present in the software
+PPE listing. Fixing flowtable membership alone did not establish WED egress.
+Temporary dynamic-debug tracing confirmed WED flow-block bind calls and was
+disabled again after the check. No reboot or flash was performed.
+
+Source inspection then found a separate missing integration in
+`net/netfilter/nf_flow_table_path.c`: `nft_dev_path_info` treated
+`DEV_PATH_MTK_WDMA` as an unknown path and cleared `info.indev`. This prevents
+Wi-Fi paths from acquiring direct TX parameters even though mt76 returns a
+valid WDMA path. The published patch by Eric Woudstra was rebased onto this
+6.18 tree and included in OpenWrt's generic pending patches with attribution:
+https://lists.infradead.org/pipermail/linux-mediatek/2026-March/105004.html
+
+A harness compiling the actual path helper reproduces the lost bridge-to-
+WDMA destination before the change and passes after it. Additional cases
+cover a native WDMA path, hardware offload disabled, VLAN/Ethernet, and an
+unknown path. This validates path discovery only. The repaired image still
+requires a hardware traffic test to establish reverse-flow BIND, working
+PPE-to-WED forwarding, connectivity and CPU load under sustained traffic.
+
+
+The kernel, kernel packages, root filesystem installation and image builds
+passed. The Askey and XX230v `-initramfs-kernel-wed-path.bin` images were
+checked for FIT hashes, the final kernel/root archive, the corrected
+`nf_flow_table.ko`, mt76 modules, firmware 7.11, WED TX flags and reserved
+GDMA channels. Their SHA256 values are recorded in
+`bin/targets/airoha/en7523/clankernpu-7.11-wed-path.sha256` in OpenWrt.
+These images were prepared without restarting either router.

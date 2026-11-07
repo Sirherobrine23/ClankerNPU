@@ -146,7 +146,7 @@ HWNAT mail id 1 (`HWNAT_INIT`) stores the board config and runs
 family (`0x1FB00064 >> 16`). Family 14 has a second PPE at `+0x1000`
 that gets the same setup.
 
-1. find the package in the chip capability table,
+1. find the AN758x package in the chip capability table,
 2. base PPE control and misc bits,
 3. IP check blacklist,
 4. parser: ethertypes and tags the PPE decodes, or the GDM ethertype
@@ -158,15 +158,20 @@ that gets the same setup.
 
 `HWNAT_DEINIT` clears the PPE control and misc bits, the FOE pause and
 the QDMA egress ports. The `API` call writes an 80-byte FOE entry into a
-PPE entry window, writes one value, or clears the table.
+software staging area, commits it through the PPE entry window, or clears
+the SRAM table. This service also exists on EN7523 and AN7552; it does not
+require the tunnel datapath.
 
-The FOE table has 8192 entries, 16384 on AN7581, where it spans both
+The SRAM FoE table has 512 entries on EN7523/AN7552, 8192 on AN7583,
+and 16384 on AN7581, where it spans both
 PPEs' SRAM as in the stock image: the table config (`0x1FB50E1C`) gives
 the size in bits 26:24 (`1024 << n`) and 6 in bits 2:0, and entries from
 `0x2000` up are the second PPE's. With the second PPE already enabled at
 init, both PPEs get 8192 each (3, and 4 and 5 in bits 2:0). The clear
 takes the whole table and sends entries from `0x2000` up to the second
-PPE while it is enabled, as the value write does.
+PPE while it is enabled, as the value write does. EN7523/AN7552 use size
+encoding 7 for 512 SRAM entries and encoding 4 for their 16K DRAM table.
+Host DRAM base addresses are preserved during firmware initialization.
 
 ### xPON license check
 

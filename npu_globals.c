@@ -628,4 +628,9 @@ u32 en7523_wifi_port[2];
 u32 en7523_wifi_total[2];
 u32 en7523_wifi_part[2];
 u32 en7523_wifi_drop[2];
+u32 en7523_host_index[2];
 #endif
+
+/* Mailbox core 0 stages FoE data until the SDK hash command arrives. */
+u32 hwnat_sram_entry[20];
+u32 hwnat_sram_pending;
