@@ -6,10 +6,12 @@ PKG_NAME:=airoha-npu-firmware
 PKG_VERSION:=0.1.0
 PKG_RELEASE:=6
 
-PKG_BUILD_PARALLEL:=1
+PKG_TOOLCHAIN_ARCH:=riscv64
+PKG_TOOLCHAIN_TARGET:=riscv64-unknown-elf
+PKG_TOOLCHAIN_CPU_TYPE:=rv32imac
+PKG_TOOLCHAIN_ABI:=ilp32
 
 CLANKERNPU_SOURCE_DIR?=$(abspath $(CURDIR)/..)
-CLANKERNPU_CROSS?=riscv64-unknown-elf-
 CLANKERNPU_GITREV?=$(shell git -C "$(CLANKERNPU_SOURCE_DIR)" describe --always --dirty --abbrev=7 2>/dev/null || echo $(PKG_VERSION))
 
 CLANKERNPU_SOURCES:=$(wildcard \
@@ -20,7 +22,7 @@ CLANKERNPU_SOURCES:=$(wildcard \
   $(CLANKERNPU_SOURCE_DIR)/link.ld
 
 PKG_FILE_DEPENDS:=$(CLANKERNPU_SOURCES)
-PKG_CONFIG_DEPENDS:=CLANKERNPU_CROSS CLANKERNPU_GITREV
+PKG_CONFIG_DEPENDS:=CLANKERNPU_GITREV
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -36,7 +38,6 @@ clankernpu_prefix=$(patsubst %_nowifi,%,$(call clankernpu_lower,$(1)))
 
 CLANKERNPU_SOC=$(word 1,$(subst _, ,$(BUILD_VARIANT)))
 CLANKERNPU_WIFI=$(word 2,$(subst _, ,$(BUILD_VARIANT)))
-CLANKERNPU_OUTPUT:=$(PKG_BUILD_DIR)/firmware
 
 define Package/airoha-npu-firmware/Default
   SECTION:=firmware
@@ -57,8 +58,8 @@ define BuildFirmwarePackage
   define Package/$(call clankernpu_package,$(1))/install
 	$$(INSTALL_DIR) $$(1)/lib/firmware/airoha
 	$$(INSTALL_DATA) \
-		$$(CLANKERNPU_OUTPUT)/$(call clankernpu_prefix,$(1))_npu_data.bin \
-		$$(CLANKERNPU_OUTPUT)/$(call clankernpu_prefix,$(1))_npu_rv32.bin \
+		$$(PKG_BUILD_DIR)/firmware/$(call clankernpu_prefix,$(1))_npu_data.bin \
+		$$(PKG_BUILD_DIR)/firmware/$(call clankernpu_prefix,$(1))_npu_rv32.bin \
 		$$(1)/lib/firmware/airoha/
   endef
 
@@ -76,23 +77,21 @@ define Build/Prepare
 endef
 
 define Build/Configure
-	rm -rf $(PKG_BUILD_DIR)/build $(CLANKERNPU_OUTPUT)
+	rm -rf $(PKG_BUILD_DIR)/build $(PKG_BUILD_DIR)/firmware
+endef
+
+define Build/Clean
+	rm -rf $(PKG_BUILD_DIR)/build $(PKG_BUILD_DIR)/firmware
 endef
 
 define Build/Compile
 	+$(MAKE) $(PKG_JOBS) -C $(PKG_BUILD_DIR) \
-		CROSS="$(CLANKERNPU_CROSS)" \
+		CROSS="$(PKG_TOOLCHAIN_CROSS)" \
 		SOC="$(CLANKERNPU_SOC)" WIFI="$(CLANKERNPU_WIFI)" \
-		OUTPUT="$(CLANKERNPU_OUTPUT)" \
+		OUTPUT="$(PKG_BUILD_DIR)/firmware" \
 		GITREV="$(CLANKERNPU_GITREV)" \
 		MAILTRACE=0 NPUDBG=1 PROF=0 NPUTX=1 CLANKER=0 \
 		all
 endef
-
-$(eval $(call TestHostCommand,clankernpu-toolchain, \
-	Install a bare-metal RISC-V GCC toolchain with RV32 ILP32 support or set CLANKERNPU_CROSS., \
-	command -v $(CLANKERNPU_CROSS)gcc && \
-	command -v $(CLANKERNPU_CROSS)ld && \
-	command -v $(CLANKERNPU_CROSS)objcopy))
 
 $(foreach variant,$(CLANKERNPU_VARIANTS),$(eval $(call BuildFirmwarePackage,$(variant))))
