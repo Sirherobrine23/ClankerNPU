@@ -16,8 +16,15 @@
  * Size and max alloc entries vary by SoC.
  * ================================================================ */
 
+#if defined(EN7523) && defined(HAS_WIFI)
+#define SRAM_BASE         0x1E800000
+#else
 #define SRAM_BASE         0x3E800000
-#if defined(AN7552)
+#endif
+#if defined(EN7523) && defined(HAS_WIFI)
+#define SRAM_SIZE         0x60000
+#define SRAM_MAX_ENTRIES  50
+#elif defined(AN7552)
 #define SRAM_SIZE         0x40000
 #define SRAM_MAX_ENTRIES  50
 #elif defined(AN7581)
@@ -249,7 +256,14 @@ u32 sram_buf_alloc(u32 addr_type)
 
 void sram_buf_init(void)
 {
+#if defined(EN7523) && defined(HAS_WIFI)
+	u32 addr;
+
+	for (addr = SRAM_BASE; addr < SRAM_BASE + SRAM_SIZE; addr += 4)
+		REG32(addr) = 0;
+#else
 	npu_memset((void *)SRAM_BASE, 0, SRAM_SIZE);
+#endif
 	npu_memset(sram_alloc_table, 0, sizeof(sram_alloc_table));
 	sram_buf_mutex[0] = 18;
 	sram_buf_mutex[1] = 0;

@@ -1,8 +1,8 @@
 # EN7523 runtime and SDK mailbox
 
 `make SOC=EN7523` builds the four-hart md32rv firmware using the common
-startup, interrupt, timer, mutex, mailbox and debug sources. NOWIFI is the
-only supported EN7523 build until its packet datapath is ported.
+startup, interrupt, timer, mutex, mailbox and debug sources. NOWIFI provides core services; `WIFI=MT7915` adds the
+[mt76 receive transport](wireless.md) for single-HIF DBDC radios.
 
 ## Startup and memory
 
@@ -12,7 +12,10 @@ BSS and releases the other harts through an initialized barrier word; each
 hart receives a separate 16 KiB stack. `npu_init()` follows the common SoC
 sequence: synchronize harts, configure local interrupt state, initialize shared
 services on hart 0, release secondaries, run the common per-hart self-test and
-publish MIB31. Hart 2 services timer 0 at a ten millisecond period.
+publish MIB31. Each hart enables its cycle counter through CSR `0xbc0`
+before the first synchronization delay. Enabling it later in PLIC setup
+leaves secondary harts waiting forever on a stopped `mcycle` counter.
+Hart 2 services timer 0 at a ten millisecond period.
 
 EN7523 skips the AN75xx internal-bus reset, thread-manager writes and internal
 boot-UART RX setup. Native controller priorities are initialized once; each
@@ -121,12 +124,17 @@ queue-8 notifications, including stale status bits and payload guards.
 It also verifies the common startup logs, four passing self-tests and mutex
 ownership during UART output. A quiet, staggered-boot run checks that MIB21 is
 preserved and that secondary harts can start after primary initialization
-begins. Virtual cycle samples exercise delay loops without modeling real
-clock timing. Writes to the removed telemetry pages, AN75xx reset/thread
-registers or the internal boot UART fail the test.
+begins. Cycle counters start disabled; the model rejects `mcycle` reads before
+the hart enables CSR `0xbc0`. Virtual cycle samples exercise delay loops
+without modeling real clock timing. Writes to the removed telemetry pages,
+AN75xx reset/thread registers or the internal boot UART fail the test.
 
 This model does not simulate MPIS translation, cache behavior, interconnect
-timing or real packet traffic. Previous hardware evidence applies to the
-superseded v2.1 bring-up image; this image requires a new hardware boot.
-TDMA, host-adaptor rings, MT7915 reorder and PPE offload remain to be ported.
-Their unimplemented commands must keep returning failure.
+timing or real packet traffic. On 2026-11-06, an XX230v RAM boot verified four
+passing self-tests after moving the cycle-counter enable before startup
+delays. The MT7915 transport received frames on both bands; a phone associated
+on 5 GHz, obtained a DHCP lease and exchanged data in both directions.
+The MT7915 image delivers raw RX frames through 24-byte host rings. Radio TX,
+BA reorder and checksum validation remain on the host. Direct forwarding to
+the PPE and the v1 FE enqueue/dequeue engine remain unimplemented.
+Their commands keep returning failure.

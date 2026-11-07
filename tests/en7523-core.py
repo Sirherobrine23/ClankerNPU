@@ -9,7 +9,11 @@ import struct
 root = Path(sys.argv[1])
 quiet = '--quiet' in sys.argv[2:]
 staggered = '--staggered' in sys.argv[2:]
-image = (root / 'npu_rv32.bin').read_bytes()
+wifi = root.name.endswith('_MT7915')
+variant = root.name.lower().replace('_nowifi', '')
+code = root.parent / (variant + '_npu_rv32.bin')
+data = root.parent / (variant + '_npu_data.bin')
+image = (code if code.exists() else root / 'npu_rv32.bin').read_bytes()
 assert hashlib.sha256(image[:0x108]).hexdigest() == '1752af1bbce53493c6da3f36203afacb2c50edcaf79cc471cb5a9a9dd106bf98'
 assert b'CLANKER\x00' not in image[0x108:0x130]
 mem = {}
@@ -25,7 +29,7 @@ class BusWait(Exception):
 def load(addr, data):
     for i, byte in enumerate(data): mem[addr+i] = byte
 load(0x84000000, image)
-load(0x1e900000, (root / 'npu_data.bin').read_bytes())
+load(0x1e900000, (data if data.exists() else root / 'npu_data.bin').read_bytes())
 # Dirty shared BSS first so the test actually exercises primary initialization.
 linkmap = (root / 'firmware.map').read_text()
 def symbol(name):
@@ -51,7 +55,8 @@ def write(addr, val, n=4):
     assert not 0x0c000000 <= addr < 0x0c300000, hex(addr)
     assert not 0x840f0000 <= addr < 0x840f3000, 'removed telemetry page accessed'
     if 0x1ec00000 <= addr < 0x20000000:
-        assert (0x1ec09018 <= addr < 0x1ec09098 or
+        assert ((wifi and (0x1fa90030 <= addr <= 0x1fa9003c or
+                          0x1ec0d180 <= addr <= 0x1ec0d19c)) or 0x1ec09018 <= addr < 0x1ec09098 or
                 0x1ec09098 <= addr < 0x1ec090d8 or
                 0x1ec09118 <= addr < 0x1ec09128 or
                 0x1ec09138 <= addr < 0x1ec09148 or
@@ -92,12 +97,13 @@ MASK = 0xffffffff
 class Hart:
     def __init__(self, hart):
         self.hart=hart; self.r=[0]*32; self.pc=0x84000108
-        self.csr={0xf14:hart,0x7c0:0x139,0x9c0:0x7f,0x301:0x40001100}
+        self.csr={0xf14:hart,0x7c0:0x139,0x9c0:0x7f,0x301:0x40001100,0xbc0:0}
     def step(self):
         global current_hart
         current_hart = self.hart
         # Virtual cycle samples exercise delay loops without claiming cycle accuracy.
-        self.csr[0xb00] = (self.csr.get(0xb00, 0) + 1000) & MASK
+        if self.csr[0xbc0] & 1:
+            self.csr[0xb00] = (self.csr.get(0xb00, 0) + 1000) & MASK
         # Model external delivery only when both the CPU and source are enabled.
         if (self.csr.get(0x300, 0) & 8 and self.csr.get(0x304, 0) & 0x800 and
                 self.csr.get(0x7c0, 0) & 0x40):
@@ -168,6 +174,8 @@ class Hart:
             assert f==0;nxt=(r[a]+imm)&~1;r[rd]=pc+4
         elif op==0x73:
             c=w>>20;old=self.csr.get(c,0);v=r[a] if f<5 else a
+            if c == 0xb00:
+                assert self.csr[0xbc0] & 1, f'hart {self.hart}: mcycle read before counter enable'
             if f==0:
                 if w == 0x30200073:
                     status = self.csr.get(0x300, 0)
@@ -191,6 +199,8 @@ class Hart:
         else:raise AssertionError((hex(pc),hex(w)))
         self.r=[v&MASK for v in r];self.r[0]=0;self.pc=nxt&MASK
 
+if wifi:
+    exec((Path(__file__).parent / 'en7523-memcpy.py').read_text())
 harts=[Hart(i) for i in range(4)]
 def tick(n):
     global steps
@@ -210,18 +220,21 @@ def tick(n):
 NDBG = 0x1e906800
 def hart_word(hart, word):
     return read(NDBG + 0x80 + hart * 48 + word * 4)
-for _ in range(400000):
+for _ in range(2000000 if wifi else 400000):
     tick(1)
-    if read(NDBG) == 0x4e444247 and all(hart_word(i, 1) for i in range(4)):
+    if (read(NDBG) == 0x4e444247 and all(hart_word(i, 1) for i in range(4)) and
+            (not wifi or read(symbol('en7523_wifi_ready')))):
         break
 else:
     raise AssertionError('shared runtime startup did not complete')
 assert read(0x1ec0c1bc) == 0xcccccccc
 assert read(0x1ec10104) == 2500000, '500 MHz NPU / 2, ten millisecond tick'
 for i in range(4):
+    assert harts[i].csr[0xbc0] == 1, 'per-hart cycle counter enabled'
     assert harts[i].csr[0x304] == 0x800
     assert harts[i].csr[0x7c0] == 0x179
-    assert hart_word(i, 0) == 0x49444c45, 'common idle loop'
+    if not wifi or i in (0, 3):
+        assert hart_word(i, 0) == 0x49444c45, 'common idle loop'
 assert read(0x1ec0c004) == 256, 'SDK notifications route to the host'
 assert read(0x1ec0c194) == int(quiet), 'host print gate must be preserved'
 assert not mutex_owner
@@ -231,7 +244,7 @@ if quiet:
 else:
     assert 'bite my shiny metal NPU' in console
     assert 'core freq at 500 MHz' in console
-    assert 'NPU Version: TLB7.8.0.0_v003.NOWIFI.' in console
+    assert ('NPU Version: TLB7.8.0.0_v003.' + ('MT7915.' if wifi else 'NOWIFI.')) in console
     assert 'cores enabled f, running f' in console
     assert 'Error:' not in console
     for hart in range(4):
@@ -240,17 +253,17 @@ else:
     Path(root / 'boot-model.log').write_text(console)
 
 def request(cmd=0, msg_type=3, func=0, ptr=0x85012000, arg=1, size=12,
-            ifindex=0):
+            ifindex=0, value=0xffffffff):
     q=0x1ec0c030
     # The caller owns this dynamic buffer; no fixed diagnostic page is reserved.
     payload = ptr if 0x80000000 <= ptr <= 0xbfffffe0 else 0x85012000
     for i, value in enumerate(((msg_type << 4) | ifindex, cmd,
-                               0xffffffff, 0x12345678)):
+                               value, 0x12345678)):
         load(payload+i*4, value.to_bytes(4,'little'))
     write(q,ptr);write(q+4,size);write(q+12,(func<<11)|arg)
     before = completed[0]
     write(q+8,read(q+8)+1)
-    for _ in range(10000):
+    for _ in range(300000 if wifi else 10000):
         tick(1)
         if completed[0] > before:
             return read(q+12), read(payload+8)
@@ -297,6 +310,8 @@ failures = (
     (dict(arg=0x21), EOPNOTSUPP),
 )
 for kwargs, expected in failures:
+    if wifi and kwargs == dict(msg_type=1):
+        expected = EINVAL
     control,info=request(**kwargs)
     assert control&0x1e == (expected<<2)|2, (kwargs,control,expected)
     assert info==0xffffffff, 'rejection must leave the payload untouched'
@@ -330,6 +345,8 @@ for src in (0,127):
     injected[3].add(src);tick(1000)
     assert not read(addr)&1<<(src&31)
 assert completed[3]==2
+if wifi:
+    exec((Path(__file__).parent / 'en7523-wifi.py').read_text())
 # Inject a real exception into the model; no firmware fault-injection opcode exists.
 h=harts[1]
 h.csr.update({0x341:h.pc,0x342:11,0x343:0})

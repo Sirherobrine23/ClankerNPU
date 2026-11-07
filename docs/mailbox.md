@@ -166,6 +166,10 @@ they return EOPNOTSUPP. The old placeholder MDC-lock handler returned success
 without a value, so it is not registered. The old private GET mapping-dump
 command is not part of this ABI.
 
+The EN7523 MT7915 transport has its own supported subset and START/STOP
+semantics, described in [wireless.md](en7523/wireless.md). Its 24-byte host
+descriptor is selected explicitly by the matching mt76 profile.
+
 GET_WAIT_NPU_VERSION (10) works on every build, including NOWIFI. It returns
 one little-endian u32: major in bits 31:16, minor in bits 15:0. Both the boot
 banner and this reply use `NPU_VERSION_MAJOR`/`NPU_VERSION_MINOR`; the current

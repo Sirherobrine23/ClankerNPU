@@ -1,0 +1,219 @@
+/* EN7523 MT7915 receive transport; radio TX and reorder stay on the host. */
+#include "npu_internal.h"
+#include "npu_wifi.h"
+
+#if defined(EN7523) && defined(HAS_WIFI)
+
+#define RX_DESCS	1536
+#define RX_BYTES	3500
+#define RX_DONE		0x80000000
+#define RX_LAST		0x40000000
+
+extern volatile u32 en7523_wifi_ready;
+extern volatile u32 en7523_wifi_enabled[2];
+extern volatile u32 en7523_wifi_busy[2];
+extern u32 en7523_wifi_prepared[2];
+extern u32 en7523_wifi_regs[2];
+extern u32 en7523_wifi_ring[2];
+extern u32 en7523_wifi_index[2];
+extern u32 en7523_wifi_port;
+extern u32 en7523_wifi_total[2];
+extern u32 en7523_wifi_part[2];
+extern u32 en7523_wifi_drop[2];
+
+static void wifi_fence(void)
+{
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+}
+
+void en7523_wifi_init(void)
+{
+	u32 base;
+
+	sram_buf_init();
+	buf_mgr_init();
+	base = sram_buf_alloc(1);
+	if (!base)
+		return;
+	en7523_wifi_ring[0] = base + 0x6020;
+	en7523_wifi_ring[1] = base;
+	wifi_fence();
+	en7523_wifi_ready = 1;
+}
+
+static int en7523_wifi_prepare(u32 band, u32 count)
+{
+	volatile u32 *desc = (volatile u32 *)en7523_wifi_ring[band];
+	u32 i, window;
+	s32 id;
+
+	if (count != RX_DESCS || !wifi_pkt_buf_addr ||
+	    !en7523_wifi_regs[band] || en7523_wifi_enabled[band])
+		return NPU_MBOX_EINVAL;
+	if (en7523_wifi_prepared[band])
+		return NPU_MBOX_SUCCESS;
+
+	/* The SDK's P1 window is at SCU +0x38, P0 at +0x30. */
+	window = en7523_wifi_port ? PCIE0_WIN_BASE : 0x1fa90030;
+	REG32(window) = en7523_wifi_ring[1];
+	REG32(window + 4) = en7523_wifi_ring[0] + RX_DESCS * 16;
+	for (i = 0; i < count; i++, desc += 4) {
+		id = buf_mgr_alloc();
+		if (id < 0)
+			return NPU_MBOX_ERROR;
+		desc[0] = wifi_pkt_buf_addr + ((u32)id << 12);
+		desc[1] = RX_BYTES << 16;
+		desc[2] = 0;
+		desc[3] = 0;
+	}
+	wifi_fence();
+	en7523_wifi_prepared[band] = 1;
+	return NPU_MBOX_SUCCESS;
+}
+
+static int en7523_wifi_run(u32 band, u32 enable)
+{
+	u32 i, base;
+
+	if (enable > 1)
+		return NPU_MBOX_EINVAL;
+	if (!enable) {
+		en7523_wifi_enabled[band] = 0;
+		wifi_fence();
+		for (i = 0; i < 100; i++) {
+			if (!en7523_wifi_busy[band]) {
+				wifi_fence();
+				return NPU_MBOX_SUCCESS;
+			}
+			delay_ms_mcycle(1);
+		}
+		return NPU_MBOX_ERROR;
+	}
+	if (!en7523_wifi_prepared[band])
+		return NPU_MBOX_ENODEV;
+	for (i = 0; i < 2; i++) {
+		base = REG32(HOSTADPT_RX_BASE_PTR(i));
+		if ((base & 3) || base < 0x80000000 || base > 0xbfffd000 ||
+		    REG32(HOSTADPT_RX_MAX_CNT(i)) != 512)
+			return NPU_MBOX_EINVAL;
+	}
+	if (en7523_wifi_enabled[band])
+		return NPU_MBOX_SUCCESS;
+	hostadpt_init();
+	en7523_wifi_total[band] = 0;
+	en7523_wifi_part[band] = 0;
+	en7523_wifi_drop[band] = 0;
+	wifi_fence();
+	en7523_wifi_enabled[band] = 1;
+	return NPU_MBOX_SUCCESS;
+}
+
+int en7523_wifi_set(u32 *msg)
+{
+	u32 band = msg[0] & 15, val = msg[2];
+
+	if (band > 1)
+		return NPU_MBOX_EINVAL;
+	if (!en7523_wifi_ready)
+		return NPU_MBOX_ENODEV;
+	switch (msg[1]) {
+	case WLAN_FUNC_SET_WAIT_NPU_INIT_DONE:
+		return en7523_wifi_run(band, val);
+	case WLAN_FUNC_SET_WAIT_PCIE_ADDR:
+		if (!val || (val & 3) || val >= 0x80000000 ||
+		    en7523_wifi_prepared[band])
+			return NPU_MBOX_EINVAL;
+		en7523_wifi_regs[band] = val;
+		break;
+	case WLAN_FUNC_SET_WAIT_DESC:
+		return en7523_wifi_prepare(band, val);
+	case WLAN_FUNC_SET_WAIT_DRIVER_MODEL:
+		if (val > 1)
+			return NPU_MBOX_EOPNOTSUPP;
+		break;
+	case WLAN_FUNC_SET_WAIT_PKT_BUF_ADDR:
+		if (val < 0x80000000 || val > 0xc0000000 - (5600u << 12) ||
+		    (val & 0xfff) || en7523_wifi_prepared[0] ||
+		    en7523_wifi_prepared[1])
+			return NPU_MBOX_EINVAL;
+		wifi_pkt_buf_addr = val;
+		break;
+	case WLAN_FUNC_SET_WAIT_PCIE_PORT_TYPE:
+		if (val > 1 || en7523_wifi_prepared[0] ||
+		    en7523_wifi_prepared[1])
+			return NPU_MBOX_EINVAL;
+		en7523_wifi_port = val;
+		break;
+	case WLAN_FUNC_SET_WAIT_IS_FORCE_TO_CPU:
+		if (val != 1)
+			return NPU_MBOX_EOPNOTSUPP;
+		break;
+	default:
+		return NPU_MBOX_EOPNOTSUPP;
+	}
+	return NPU_MBOX_SUCCESS;
+}
+
+int en7523_wifi_get(u32 *msg)
+{
+	u32 band = msg[0] & 15;
+
+	if (band > 1)
+		return NPU_MBOX_EINVAL;
+	if (!en7523_wifi_ready)
+		return NPU_MBOX_ENODEV;
+	msg[2] = msg[1] == WLAN_FUNC_GET_WAIT_RXDESC_BASE ?
+		 en7523_wifi_ring[band] : 0;
+	return NPU_MBOX_SUCCESS;
+}
+
+static void en7523_wifi_rx(u32 band)
+{
+	u32 idx = en7523_wifi_index[band];
+	volatile u32 *desc = (volatile u32 *)(en7523_wifi_ring[band] + idx * 16);
+	u32 ctrl = desc[1], buf, len, total, part, parts;
+	u8 flags;
+
+	if (!(ctrl & RX_DONE))
+		return;
+	wifi_fence();
+	buf = desc[0];
+	len = (ctrl >> 16) & 0x3fff;
+	part = en7523_wifi_part[band] + 1;
+	if (part == 1) {
+		total = ctrl & RX_LAST ? len : REG32(buf) & 0xffff;
+		en7523_wifi_total[band] = total;
+		en7523_wifi_drop[band] = !total || total > 0x3fff;
+	}
+	total = en7523_wifi_total[band];
+	parts = (total + RX_BYTES - 1) / RX_BYTES;
+	if (!len || len > RX_BYTES || part > parts)
+		en7523_wifi_drop[band] = 1;
+	if (!en7523_wifi_drop[band]) {
+		flags = (part << 2) | (parts << 5);
+		if (host_ring_submit(buf, len, band, 0, 0, flags, total,
+				     !!(ctrl & RX_LAST), 0))
+			en7523_wifi_drop[band] = 1;
+	}
+	en7523_wifi_part[band] = ctrl & RX_LAST ? 0 : part;
+	desc[1] = RX_BYTES << 16;
+	wifi_fence();
+	REG32(en7523_wifi_regs[band] + 8) = idx;
+	en7523_wifi_index[band] = idx + 1 == RX_DESCS ? 0 : idx + 1;
+}
+
+void en7523_wifi_rx_loop(u32 band)
+{
+	npu_dbg_loop(NDBG_TAG('W', 'R', 'X', '0') + band);
+	while (1) {
+		npu_dbg_poll();
+		en7523_wifi_busy[band] = 1;
+		wifi_fence();
+		if (en7523_wifi_enabled[band])
+			en7523_wifi_rx(band);
+		wifi_fence();
+		en7523_wifi_busy[band] = 0;
+	}
+}
+
+#endif

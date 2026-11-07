@@ -32,6 +32,10 @@ jobs:
           - SOC: AN7583
             WIFI: NOWIFI
 
+          # MT7915
+          - SOC: EN7523
+            WIFI: MT7915
+
           # MT7916
           # - SOC: EN7523
           #   WIFI: MT7916

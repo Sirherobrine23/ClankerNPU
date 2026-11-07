@@ -25,6 +25,31 @@ void *npu_memcpy(void *dst, const void *src, u32 n)
 	u8 *d = (u8 *)dst;
 	const u8 *s = (const u8 *)src;
 
+#ifdef EN7523
+	/* Packet buffers are word-aligned; avoid byte transactions to uncached DRAM. */
+	if (!(((u32)d | (u32)s) & 3)) {
+		u32 *dw = (u32 *)d;
+		const u32 *sw = (const u32 *)s;
+
+		while (n >= 16) {
+			u32 v0 = sw[0], v1 = sw[1], v2 = sw[2], v3 = sw[3];
+
+			dw[0] = v0;
+			dw[1] = v1;
+			dw[2] = v2;
+			dw[3] = v3;
+			sw += 4;
+			dw += 4;
+			n -= 16;
+		}
+		while (n >= 4) {
+			*dw++ = *sw++;
+			n -= 4;
+		}
+		d = (u8 *)dw;
+		s = (const u8 *)sw;
+	}
+#endif
 	while (n--)
 		*d++ = *s++;
 	return dst;

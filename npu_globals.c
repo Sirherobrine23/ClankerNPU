@@ -78,7 +78,10 @@ u32 timer_pair_bit[4] = { 0x19, 0x1a, 0x1b, 0x1c };
 wifi_mail_fn_t get_wait_func_table[WLAN_FUNC_GET_WAIT_MAX]
 	__attribute__((section(".data"))) = {
 	[WLAN_FUNC_GET_WAIT_NPU_VERSION] = wifi_mail_get_npu_version,
-#ifdef WIFI_KITE
+#if defined(EN7523) && defined(HAS_WIFI)
+	[WLAN_FUNC_GET_WAIT_NPU_INFO] = en7523_wifi_get,
+	[WLAN_FUNC_GET_WAIT_RXDESC_BASE] = en7523_wifi_get,
+#elif defined(WIFI_KITE)
 	[WLAN_FUNC_GET_WAIT_NPU_INFO] = wifi_mail_get_npu_info,
 	[WLAN_FUNC_GET_WAIT_LAST_RATE] = wifi_mail_get_last_rate,
 	[WLAN_FUNC_GET_WAIT_COUNTER] = wifi_mail_get_counter,
@@ -103,7 +106,15 @@ wifi_mail_fn_t get_wait_func_table[WLAN_FUNC_GET_WAIT_MAX]
 
 wifi_mail_fn_t set_wait_func_table[WLAN_FUNC_SET_WAIT_MAX]
 	__attribute__((section(".data"))) = {
-#ifdef WIFI_KITE
+#if defined(EN7523) && defined(HAS_WIFI)
+	[WLAN_FUNC_SET_WAIT_PCIE_ADDR] = en7523_wifi_set,
+	[WLAN_FUNC_SET_WAIT_DESC] = en7523_wifi_set,
+	[WLAN_FUNC_SET_WAIT_NPU_INIT_DONE] = en7523_wifi_set,
+	[WLAN_FUNC_SET_WAIT_DRIVER_MODEL] = en7523_wifi_set,
+	[WLAN_FUNC_SET_WAIT_PKT_BUF_ADDR] = en7523_wifi_set,
+	[WLAN_FUNC_SET_WAIT_IS_FORCE_TO_CPU] = en7523_wifi_set,
+	[WLAN_FUNC_SET_WAIT_PCIE_PORT_TYPE] = en7523_wifi_set,
+#elif defined(WIFI_KITE)
 	[WLAN_FUNC_SET_WAIT_PCIE_ADDR] = wifi_mail_set_pcie_addr,
 	[WLAN_FUNC_SET_WAIT_DESC] = wifi_mail_set_desc,
 	[WLAN_FUNC_SET_WAIT_NPU_INIT_DONE] = wifi_mail_set_init_done,
@@ -603,4 +614,18 @@ struct sta_q_probe *sta_q_probe;
 #if defined(WIFI_KITE) && defined(HAS_TR471)
 volatile u32 kite_wifi_cfg[26];
 volatile u32 kite_test_active;
+#endif
+
+#if defined(EN7523) && defined(HAS_WIFI)
+volatile u32 en7523_wifi_ready;
+volatile u32 en7523_wifi_enabled[2];
+volatile u32 en7523_wifi_busy[2];
+u32 en7523_wifi_prepared[2];
+u32 en7523_wifi_regs[2];
+u32 en7523_wifi_ring[2];
+u32 en7523_wifi_index[2];
+u32 en7523_wifi_port;
+u32 en7523_wifi_total[2];
+u32 en7523_wifi_part[2];
+u32 en7523_wifi_drop[2];
 #endif

@@ -7,7 +7,7 @@ SIZE    := $(CROSS)size
 
 # SoC: EN7523, AN7552, AN7581, AN7583
 SOC     ?= AN7583
-# WiFi: MT7916, MT7991, MT7992, MT7993, MT7996, NOWIFI
+# WiFi: MT7915, MT7991, MT7992, MT7993, MT7996, NOWIFI
 WIFI    ?= $(if $(filter EN7523,$(SOC)),NOWIFI,MT7996)
 # 1 logs every WiFi mailbox command, from inside the mailbox ISR
 MAILTRACE ?= 0
@@ -23,8 +23,8 @@ CLANKER ?= 0
 GITREV ?= $(shell git describe --always --dirty --abbrev=7 2>/dev/null || echo nogit)
 
 ifeq ($(SOC),EN7523)
-ifneq ($(WIFI),NOWIFI)
-$(error EN7523 currently supports NOWIFI; the WiFi datapath is not ported)
+ifeq ($(filter $(WIFI),NOWIFI MT7915),)
+$(error EN7523 supports NOWIFI or MT7915)
 endif
 ARCH := -march=rv32im_zicsr_zifencei -mabi=ilp32
 else
@@ -43,14 +43,17 @@ ASFLAGS := $(ARCH) -D$(SOC) -D$(WIFI)
 LIBGCC  := $(shell $(CC) $(ARCH) -print-libgcc-file-name)
 
 BUILD   := build/$(SOC)_$(WIFI)
+OUTPUT  ?= build
+
 LINK_SCRIPT := $(BUILD)/link.ld
 LDFLAGS := -m elf32lriscv -T $(LINK_SCRIPT) -nostdlib --gc-sections --relax \
            --print-memory-usage
 ELF     := $(BUILD)/firmware.elf
 MAP     := $(BUILD)/firmware.map
 DIS     := $(BUILD)/firmware.dis
-BIN     := build/$(shell echo $(SOC) | tr '[:upper:]' '[:lower:]')$(if $(filter NOWIFI,$(WIFI)),,_$(shell echo $(WIFI) | tr '[:upper:]' '[:lower:]'))_npu_rv32.bin
-DATA    := build/$(shell echo $(SOC) | tr '[:upper:]' '[:lower:]')$(if $(filter NOWIFI,$(WIFI)),,_$(shell echo $(WIFI) | tr '[:upper:]' '[:lower:]'))_npu_data.bin
+
+BIN     := $(OUTPUT)/$(shell echo $(SOC) | tr '[:upper:]' '[:lower:]')$(if $(filter NOWIFI,$(WIFI)),,_$(shell echo $(WIFI) | tr '[:upper:]' '[:lower:]'))_npu_rv32.bin
+DATA    := $(OUTPUT)/$(shell echo $(SOC) | tr '[:upper:]' '[:lower:]')$(if $(filter NOWIFI,$(WIFI)),,_$(shell echo $(WIFI) | tr '[:upper:]' '[:lower:]'))_npu_data.bin
 
 SRCS_S  := crt0.S
 # Keep npu_globals.c first among C objects to preserve the data tables.
@@ -61,7 +64,7 @@ SRCS_C  := npu_globals.c \
            npu_dba.c npu_tr471.c npu_dbg.c \
            npu_wifi.c npu_wifi_bufid.c npu_wifi_fwd.c npu_wifi_ba.c \
            npu_wifi_rx.c npu_wifi_init.c \
-           npu_wifi_kite.c npu_wifi_eagle.c npu_wifi_eagle_dp.c \
+           npu_wifi_en7523.c npu_wifi_kite.c npu_wifi_eagle.c npu_wifi_eagle_dp.c \
            npu_tdma.c npu_hostadpt.c npu_sta_q.c \
            npu_tunnel.c npu_ppe.c npu_l4s.c
 OBJS    := $(patsubst %.S,$(BUILD)/%.o,$(SRCS_S)) \
@@ -72,8 +75,11 @@ FLAGS   := $(BUILD)/.flags
 
 all: $(BIN) $(DATA)
 
-$(BUILD):
+$(BUILD): $(OUTPUT)
 	mkdir -p $(BUILD)
+
+$(OUTPUT):
+	mkdir -p $(OUTPUT)
 
 # rebuild when the build flags change, not just the sources
 $(BUILD)/.flags: FORCE | $(BUILD)
@@ -107,8 +113,8 @@ disasm: $(ELF)
 clean:
 	rm -rf build/
 
-# Build all 12 variants
-VARIANTS := EN7523_NOWIFI                                                                       \
+# Build the supported variant matrix
+VARIANTS := EN7523_NOWIFI EN7523_MT7915                                                                       \
             AN7552_NOWIFI AN7552_MT7916 AN7552_MT7991               AN7552_MT7993               \
             AN7581_NOWIFI AN7581_MT7916               AN7581_MT7992                             \
             AN7583_NOWIFI AN7583_MT7916               AN7583_MT7992 AN7583_MT7993 AN7583_MT7996

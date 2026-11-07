@@ -45,8 +45,13 @@ int hostadpt_init(void)
 	while (REG32(HOSTADPT_RX_DMA_PTR) == 0)
 		;
 
+#ifdef EN7523
+	hostadpt_tx_ring_base = REG32(HOSTADPT_TX_DMA_PTR);
+	hostadpt_rx_ring_base = REG32(HOSTADPT_RX_DMA_PTR);
+#else
 	hostadpt_tx_ring_base = (REG32(HOSTADPT_TX_DMA_PTR) & 0x3FFFFFFF) | 0x40000000;
 	hostadpt_rx_ring_base = (REG32(HOSTADPT_RX_DMA_PTR) & 0x3FFFFFFF) | 0x40000000;
+#endif
 	hostadpt_tx_ring_ready = 1;
 	return 0;
 }
@@ -83,8 +88,16 @@ static void host_ring_write_desc(u32 desc_addr, u32 buf_addr, u16 pkt_len,
 	bridge_dma_copy(3, buf_addr, d[3], dma_len);
 
 	d[2] = info;
+#ifdef EN7523
+	d[1] = (wcid & 0xFFFF) | (((fwd_type >> 2) & 7) << 26) |
+	       ((((u32)fwd_type >> 5) & 7) << 29);
+#else
 	d[1] = (wcid & 0xFFFF) | ((amsdu & 0x1F) << 16) |
 	       ((fwd_type & 0x3F) << 26);
+#endif
+#ifdef EN7523
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+#endif
 	d[0] = 1 | ((orig_len & 0x3FFF) << 1) | ((pkt_len & 0x3FFF) << 15) |
 	       ((is_last & 1) << 29);
 
@@ -112,6 +125,10 @@ int host_ring_submit(u32 buf_addr, u16 pkt_len, u32 band,
 	if (band == 0) {
 		idx = REG32(HOSTADPT_RX_DMA_IDX(0));
 		ring_base = hostadpt_tx_ring_base;
+#ifdef EN7523
+		if (*(volatile u32 *)(ring_base + idx * 24) & 1)
+			return -1;
+#endif
 
 		check_idx = idx + 2;
 		if (check_idx > 511)
@@ -138,6 +155,10 @@ int host_ring_submit(u32 buf_addr, u16 pkt_len, u32 band,
 	} else if (band == 1) {
 		idx = REG32(HOSTADPT_RX_DMA_IDX(1));
 		ring_base = hostadpt_rx_ring_base;
+#ifdef EN7523
+		if (*(volatile u32 *)(ring_base + idx * 24) & 1)
+			return -1;
+#endif
 
 		check_idx = idx + 2;
 		if (check_idx > 511)

@@ -32,9 +32,8 @@ void plic_init(void)
 	for (word = 0; word < 4; word++)
 		REG32(PLIC_HART_ENABLE(hart, word)) = 0;
 	REG32(PLIC_THRESHOLD(hart)) = 0;
-	/* These local source masks and the mode CSR are part of the v1
+	/* These local source masks are part of the v1
 	 * vendor initialization, not SiFive PLIC contexts. */
-	csr_write(0xbc0, 1);
 	csr_write(0x5e8, ALL_FF);
 	csr_write(0x5e9, ALL_FF);
 	csr_write(0x5ea, ALL_FF);

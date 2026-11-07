@@ -266,6 +266,14 @@ int boot_printf(const char *fmt, ...);
 void uart_rx_isr(int src);
 void boot_uart_init(void);
 
+/* npu_wifi_en7523.c */
+#if defined(EN7523) && defined(HAS_WIFI)
+void en7523_wifi_init(void);
+void en7523_wifi_rx_loop(u32 band);
+int en7523_wifi_set(u32 *msg);
+int en7523_wifi_get(u32 *msg);
+#endif
+
 /* npu_wifi.c */
 int hostadpt_init(void);
 void tdma_init(void);

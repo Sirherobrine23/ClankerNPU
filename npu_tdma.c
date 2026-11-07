@@ -20,6 +20,10 @@
 #ifdef HAS_WIFI
 void bridge_dma_copy(u32 channel, u32 src, u32 dst, u32 len)
 {
+#ifdef EN7523
+	(void)channel;
+	npu_memcpy((void *)dst, (void *)src, len);
+#else
 	u32 mask = 1u << channel;
 
 	REG32(DMA_COPY_SRC(channel)) = src;
@@ -29,6 +33,7 @@ void bridge_dma_copy(u32 channel, u32 src, u32 dst, u32 len)
 	while (!(REG32(DMA_COPY_STATUS) & mask))
 		;
 	REG32(DMA_COPY_STATUS) = mask;
+#endif
 }
 #endif
 

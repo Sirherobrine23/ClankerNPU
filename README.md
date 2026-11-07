@@ -4,18 +4,19 @@ Bare-metal firmware for the RISC-V network processor (NPU) inside the
 Airoha EN7523, AN7552, AN7581 and AN7583 SoCs. The NPU is a cluster of
 RV32IM (EN7523) or RV32IMC (AN75xx) harts with no OS and no MMU. Each hart runs one polling loop. Together
 they offload WiFi forwarding, tunnel header rewrites and GPON upstream
-scheduling from the ARM host on AN75xx. EN7523 currently provides core
-services and the initial SDK mailbox control transport.
+scheduling from the ARM host on AN75xx. EN7523 provides core services, mailbox control and an MT7915 receive
+transport for mt76. Radio TX and receive reordering remain on the host.
 
 ## Variants
 
 | SoC    | Harts |   SRAM | WiFi chips                           | Extra features           |
 | ------ | ----: | -----: | ------------------------------------ | ------------------------ |
-| EN7523 |     4 | 384 KB | MT7915, MT7916                       | core services only       |
+| EN7523 |     4 | 384 KB | MT7915, none                         | host RX transport        |
 | AN7552 |     2 | 256 KB | MT7916, MT7991, MT7993               | none                     |
 | AN7581 |     8 | 480 KB | MT7916, MT7992, MT7996               | tunnel offload, TR-471   |
 | AN7583 |     6 | 512 KB | MT7916, MT7992, MT7993, MT7996, none | tunnel offload, GPON DBA |
 
+MT7915 on EN7523 uses the [host RX transport](docs/en7523/wireless.md).
 MT7916 and MT7996 use the **kite** datapath; MT7991, MT7992 and MT7993
 use the **eagle** datapath. Each SoC and WiFi pair is its own image.
 
@@ -104,7 +105,7 @@ Requires `riscv64-unknown-elf-gcc` (tested with GCC 14.2).
 
 ```sh
 make SOC=AN7583 WIFI=MT7993        # one variant
-make all-variants                  # all 12 variants
+make all-variants                  # all supported variants
 make SOC=EN7523 check disasm       # core services, defaults to NOWIFI
 make SOC=AN7583 WIFI=MT7993 disasm # build/<variant>/firmware.dis
 ```
@@ -112,7 +113,7 @@ make SOC=AN7583 WIFI=MT7993 disasm # build/<variant>/firmware.dis
 | variable    | default                                | effect                                                                                  |
 | ----------- | -------------------------------------- | --------------------------------------------------------------------------------------- |
 | `SOC`       | `AN7583`                               | `EN7523`, `AN7552`, `AN7581`, `AN7583`                                                  |
-| `WIFI`      | `NOWIFI` on EN7523, `MT7996` otherwise | `MT7916`, `MT7991`, `MT7992`, `MT7993`, `MT7996`, `NOWIFI`                              |
+| `WIFI`      | `NOWIFI` on EN7523, `MT7996` otherwise | `MT7915`, `MT7916`, `MT7991`, `MT7992`, `MT7993`, `MT7996`, `NOWIFI`                    |
 | `MAILTRACE` | 0                                      | 1 logs every WiFi mail from the mailbox ISR                                             |
 | `NPUTX`     | 1                                      | 0 stages host tx frames but never writes the WiFi tx ring                               |
 | `NPUDBG`    | 0                                      | 1 starts with the WiFi and stats print bits of the [debug block](docs/debug.md) set     |
@@ -121,14 +122,52 @@ make SOC=AN7583 WIFI=MT7993 disasm # build/<variant>/firmware.dis
 | `GITREV`    | `git describe`                         | hash in the boot `NPU Version` line                                                     |
 | `CROSS`     | `riscv64-unknown-elf-`                 | toolchain prefix                                                                        |
 
-Outputs in `build/<SOC>_<WIFI>/`:
+Firmware files go to `OUTPUT` (default `build/`). Intermediate files stay
+in `build/<SOC>_<WIFI>/`:
 
-| file           | content                                                         |
-| -------------- | --------------------------------------------------------------- |
-| `npu_rv32.bin` | code and rodata, loaded to DRAM at `0x84000000`                 |
-| `npu_data.bin` | initialized data, SRAM at `0x1E900000` (EN7523) or `0x3E900000` |
-| `firmware.elf` | full ELF                                                        |
-| `firmware.map` | linker map                                                      |
+| file                        | content                                                         |
+| --------------------------- | --------------------------------------------------------------- |
+| `<soc>_<wifi>_npu_rv32.bin` | code and rodata, loaded to DRAM at `0x84000000`                 |
+| `<soc>_<wifi>_npu_data.bin` | initialized data, SRAM at `0x1E900000` (EN7523) or `0x3E900000` |
+| `firmware.elf`              | full ELF                                                        |
+| `firmware.map`              | linker map                                                      |
+
+The `<soc>` and `<wifi>` filename components are lowercase; NOWIFI omits
+the `_<wifi>` component.
+
+### OpenWrt package
+
+add to `feeds.conf` / `feeds.conf.default`
+
+```
+src-link npu <full path>/ClankerNPU
+# or
+src-git npu https://sirherobrine23.com.br/airoha/ClankerNPU.git
+```
+
+`openwrt-pkg/Makefile` builds firmware from this checkout. Register the
+`openwrt-pkg` directory as an OpenWrt package or feed entry, then select the
+required packages under **Firmware → Airoha NPU Firmware**. It replaces the
+prebuilt packages with the same names.
+
+Each selected SoC/radio pair is an OpenWrt build variant. Sources are copied
+into its own build directory, and both binaries are installed under
+`/lib/firmware/airoha/`. Packages ending in `-nowifi-npu-firmware` install
+the corresponding `<soc>_npu_*.bin` files. Unsupported combinations, including
+EN7523/MT7916, are not offered.
+
+The build host needs a bare-metal RISC-V GCC/binutils toolchain with RV32
+ILP32 support. It uses `riscv64-unknown-elf-` by default; the OpenWrt target's
+ARM compiler is not used. These make variables can override the defaults:
+
+| Variable                | Meaning                                                              |
+| ----------------------- | -------------------------------------------------------------------- |
+| `CLANKERNPU_SOURCE_DIR` | Source checkout; defaults to the recipe's parent directory           |
+| `CLANKERNPU_CROSS`      | RISC-V toolchain prefix, optionally with an absolute path            |
+| `CLANKERNPU_GITREV`     | Embedded revision; defaults to the source checkout's Git description |
+
+Source changes trigger package preparation again. Debug tracing and profiling
+are disabled, and the firmware's default `CLANKER=0` behavior is retained.
 
 ### clangd
 

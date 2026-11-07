@@ -14,7 +14,7 @@
 /*
  * Build-time variant selection.
  * Define exactly one SoC: EN7523, AN7552, AN7581, AN7583
- * Define exactly one WiFi chip (or NOWIFI): MT7916, MT7991, MT7992, MT7993, MT7996, NOWIFI
+ * Define exactly one WiFi chip (or NOWIFI): MT7915, MT7916, MT7991, MT7992, MT7993, MT7996, NOWIFI
  *
  * SoC → core count:
  *   EN7523 → 4 cores
@@ -31,8 +31,8 @@
 #if defined(EN7523)
 #define MAX_CORE_NUM    4
 #define NPU_TIMER_NUM   4
-#if !defined(NOWIFI)
-#error "EN7523 WiFi datapath is not ported"
+#if !defined(NOWIFI) && !defined(MT7915)
+#error "EN7523 supports NOWIFI or MT7915"
 #endif
 #elif defined(AN7552)
 #define MAX_CORE_NUM    2
@@ -52,7 +52,11 @@
 #error "Define one SoC: EN7523, AN7552, AN7581, or AN7583"
 #endif
 
-#if defined(MT7916) || defined(MT7996)
+#if defined(MT7915) && !defined(EN7523)
+#error "MT7915 is supported on EN7523"
+#endif
+
+#if defined(MT7915) || defined(MT7916) || defined(MT7996)
 #define WIFI_KITE
 #define HAS_WIFI
 #elif defined(MT7991) || defined(MT7992) || defined(MT7993)
@@ -76,7 +80,7 @@
 #define HAS_TR471
 #endif
 
-#if !defined(AN7581) && defined(HAS_WIFI)
+#if !defined(AN7581) && !defined(EN7523) && defined(HAS_WIFI)
 #define HAS_BME
 #endif
 

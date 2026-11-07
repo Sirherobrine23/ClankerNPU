@@ -398,6 +398,19 @@ void core_dispatch(int a0, int a1)
 	(void)a1;
 
 #ifdef EN7523
+#ifdef HAS_WIFI
+	switch (get_hartid()) {
+	case 0:
+		en7523_wifi_init();
+		break;
+	case 1:
+		en7523_wifi_rx_loop(0);
+		break;
+	case 2:
+		en7523_wifi_rx_loop(1);
+		break;
+	}
+#endif
 	npu_dbg_idle();
 #else
 	switch (core) {
@@ -594,6 +607,11 @@ void npu_init(void)
 {
 	u32 hart = get_hartid();
 	u32 mib21;
+
+#ifdef EN7523
+	/* Enable this hart's cycle counter before the first startup delay. */
+	csr_write(0xbc0, 1);
+#endif
 
 	/* hart 0 clears sync flag; others wait */
 	if (hart != 0)
