@@ -8,6 +8,7 @@
  */
 
 #include "npu_internal.h"
+#include "npu_wifi_en7523.h"
 
 /* ================================================================
  * Hardware

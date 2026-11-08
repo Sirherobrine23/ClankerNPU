@@ -82,6 +82,11 @@ NPU_HOT u32 reorder_node_alloc(u32 band, u32 *pool_type, u16 *idx_out)
 NPU_HOT int pkt_enqueue_bridge(u32 buf_id, u32 pkt_len, u32 hdr,
 		       u32 band, u32 bss)
 {
+#ifdef EN7523
+	(void)hdr;
+	(void)bss;
+	return en7523_rx_release(buf_id, pkt_len, band, 3);
+#else
 	u32 size, tx_len;
 	int ret;
 
@@ -125,6 +130,7 @@ NPU_HOT int pkt_enqueue_bridge(u32 buf_id, u32 pkt_len, u32 hdr,
 	if (ret != 0)
 		buf_id_free(0, band, buf_id);
 	return ret;
+#endif
 }
 
 /* ================================================================

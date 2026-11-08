@@ -2,18 +2,41 @@
 #define NPU_CONFIG_H
 
 /* Boot version line: release.wifi chip.git hash */
-#define NPU_VERSION_MAJOR	7
-#ifdef EN7523
-#define NPU_VERSION_MINOR	11
-#else
-#define NPU_VERSION_MINOR	10
+#ifndef NPU_VERSION_MAJOR
+#define NPU_VERSION_MAJOR 7
 #endif
-#define NPU_VERSION_CODE	((NPU_VERSION_MAJOR << 16) | NPU_VERSION_MINOR)
+
+#ifndef NPU_VERSION_MINOR
+#if defined(EN7523) && defined(MT7915)
+#define NPU_VERSION_MINOR 14
+#else
+#define NPU_VERSION_MINOR 13
+#endif
+#endif
+
+#ifndef NPU_VERSION_PATCH
+#define NPU_VERSION_PATCH 0
+#endif
+
+#ifndef NPU_VERSION_BUILD
+#define NPU_VERSION_BUILD 0
+#endif
+
 #define NPU_STRINGIFY_(x)	#x
 #define NPU_STRINGIFY(x)	NPU_STRINGIFY_(x)
-#define NPU_INIT_VERSION	"TLB" NPU_STRINGIFY(NPU_VERSION_MAJOR) "." \
-			NPU_STRINGIFY(NPU_VERSION_MINOR) ".0.0_v003"
-#define NPU_VERSION	NPU_INIT_VERSION "." NPU_WIFI_NAME "." NPU_GIT_REV
+
+#define NPU_VERSION_CODE(major, minor, patch, build) \
+	(((u32)(major) << 24) | \
+	 ((u32)(minor) << 16) | \
+	 ((u32)(patch) << 8)  | \
+	 (u32)(build))
+
+#define NPU_INIT_VERSION	"ClankerNOPU v" NPU_STRINGIFY(NPU_VERSION_MAJOR) \
+							"." NPU_STRINGIFY(NPU_VERSION_MINOR) \
+							"." NPU_STRINGIFY(NPU_VERSION_PATCH) \
+							"." NPU_STRINGIFY(NPU_VERSION_BUILD)
+
+#define NPU_VERSION			NPU_INIT_VERSION "_" NPU_WIFI_NAME "_" NPU_GIT_REV
 
 /*
  * Build-time variant selection.

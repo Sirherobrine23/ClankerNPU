@@ -81,6 +81,7 @@ wifi_mail_fn_t get_wait_func_table[WLAN_FUNC_GET_WAIT_MAX]
 #if defined(EN7523) && defined(HAS_WIFI)
 	[WLAN_FUNC_GET_WAIT_NPU_INFO] = en7523_wifi_get,
 	[WLAN_FUNC_GET_WAIT_RXDESC_BASE] = en7523_wifi_get,
+	[WLAN_FUNC_GET_WAIT_DBG_COUNTER] = en7523_wifi_get,
 #elif defined(WIFI_KITE)
 	[WLAN_FUNC_GET_WAIT_NPU_INFO] = wifi_mail_get_npu_info,
 	[WLAN_FUNC_GET_WAIT_LAST_RATE] = wifi_mail_get_last_rate,
@@ -114,6 +115,10 @@ wifi_mail_fn_t set_wait_func_table[WLAN_FUNC_SET_WAIT_MAX]
 	[WLAN_FUNC_SET_WAIT_PKT_BUF_ADDR] = en7523_wifi_set,
 	[WLAN_FUNC_SET_WAIT_IS_FORCE_TO_CPU] = en7523_wifi_set,
 	[WLAN_FUNC_SET_WAIT_PCIE_PORT_TYPE] = en7523_wifi_set,
+	[WLAN_FUNC_SET_WAIT_HWNAT_INIT] = en7523_rx_control,
+	[WLAN_FUNC_SET_WAIT_BA_WIN_SIZE] = en7523_rx_control,
+	[WLAN_FUNC_SET_WAIT_EN7523_STA] = en7523_rx_control,
+	[WLAN_FUNC_SET_WAIT_EN7523_KEY] = en7523_rx_control,
 #elif defined(WIFI_KITE)
 	[WLAN_FUNC_SET_WAIT_PCIE_ADDR] = wifi_mail_set_pcie_addr,
 	[WLAN_FUNC_SET_WAIT_DESC] = wifi_mail_set_desc,
@@ -634,3 +639,14 @@ u32 en7523_host_index[2];
 /* Mailbox core 0 stages FoE data until the SDK hash command arrives. */
 u32 hwnat_sram_entry[20];
 u32 hwnat_sram_pending;
+
+#if defined(EN7523) && defined(HAS_WIFI)
+volatile u32 en7523_wifi_paused[2];
+volatile u32 en7523_wifi_direct[2];
+u32 en7523_wifi_stats[2][4];
+u32 en7523_qdma_mutex[2] = { 31, 0 };
+u32 en7523_log_tick;
+u32 en7523_log_stats[2][4];
+volatile u32 en7523_qdma_done;
+volatile u32 en7523_qdma_wb_wait;
+#endif

@@ -268,6 +268,8 @@ void boot_uart_init(void);
 
 /* npu_wifi_en7523.c */
 #if defined(EN7523) && defined(HAS_WIFI)
+void en7523_qdma_loop(void);
+int en7523_rx_control(u32 *msg);
 void en7523_wifi_init(void);
 void en7523_wifi_rx_loop(u32 band);
 int en7523_wifi_set(u32 *msg);
@@ -472,7 +474,7 @@ extern volatile u32 timer_raw_tick;
 extern volatile u32 timer_slow_tick;
 extern u32 timer_int_count;
 /* kite ageing clock: AN7552 counts timer ticks, the others the slow tick */
-#ifdef AN7552
+#if defined(AN7552) || defined(EN7523)
 #define KITE_TICK (*(volatile u32 *)&timer_int_count)
 #else
 #define KITE_TICK timer_slow_tick
@@ -803,7 +805,8 @@ extern volatile u32 kite_test_active;
 /* subsystem ids: bit n of trace_mask, print_mask and the status mask */
 enum {
 	NDBG_MBOX, NDBG_WIFI, NDBG_TDMA, NDBG_TUNNEL, NDBG_L4S,
-	NDBG_PPE, NDBG_DBA, NDBG_SRAM, NDBG_TRAP, NDBG_STATS = 15,
+	NDBG_PPE, NDBG_DBA, NDBG_SRAM, NDBG_TRAP, NDBG_RX_LOG,
+	NDBG_STATS = 15,
 };
 
 /* counter slots: plain increments, exact when one hart owns the slot */

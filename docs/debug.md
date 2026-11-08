@@ -534,3 +534,12 @@ the top three bits for `sys memory`.
 **How do I read memory the host cannot map?**
 `COPY` with the NPU address and a length, then
 `sys memory 1e907400 <length>`. For one word, `READ`.
+
+### EN7523 RX/QDMA summary
+
+EN7523 with MT7915 reserves print-mask bit 9 (`rx`, `0x200`) for a periodic
+RX/QDMA summary, enabled at boot. It runs on hart 0 every 500 timer ticks;
+RX workers, the completion worker and ISRs do not emit these summaries.
+Clear only this bit to disable the summary without disabling forwarding.
+MIB21 can still silence all firmware output. Counter meanings are documented
+in [en7523/wireless.md](en7523/wireless.md#periodic-uart-receive-log).

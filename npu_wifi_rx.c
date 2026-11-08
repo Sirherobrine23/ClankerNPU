@@ -20,25 +20,7 @@
 #define kite_dbdc_model(m)	((u8)((m) - 1) <= 1)
 
 /* the fields of a received frame, laid out as a reorder node */
-struct kite_node {
-	u32 next;
-	u32 msdu_head;
-	u32 msdu_tail;
-	u16 msdu_cnt;
-	u16 pad0;
-	u8 hdr;
-	u8 tid;
-	u8 wcid;
-	u8 bss;
-	u16 buf_id;
-	u16 idx;
-	u16 sn;
-	u16 len;
-	u8 amsdu;
-	u8 pool;
-	u16 pad1;
-	u32 tick;
-};
+
 
 u32 wifi_pipeline_base;
 #if MAX_CORE_NUM > 2
@@ -87,6 +69,9 @@ static NPU_HOT void kite_rx_stats(u32 dir, u32 port, u8 state, u32 type,
 /* -1: untranslated, errored or non-QoS data frames go to the host */
 static NPU_HOT NPU_INLINE int kite_rx_parse(u32 buf_id, struct kite_node *n, u32 len, u32 band)
 {
+#ifdef EN7523
+	return en7523_rx_parse(buf_id, n, len, band);
+#else
 	u32 buf = wifi_pkt_va(buf_id);
 	u32 w1 = *(u32 *)(buf + 4);
 	u32 w2 = *(u32 *)(buf + 8);
@@ -142,6 +127,7 @@ static NPU_HOT NPU_INLINE int kite_rx_parse(u32 buf_id, struct kite_node *n, u32
 	else
 		*(u32 *)(wcid_counter_base_2g + wcid * 4) += pay;
 	return 0;
+#endif
 }
 
 /* offset of the 802.3 frame for the no-BA test mode */
@@ -268,6 +254,10 @@ static s32 kite_classify(s32 buf_id, u32 len, u32 band)
 		}
 
 		if ((sn - last) & 0x800) {
+#ifdef EN7523
+			buf_id_free(0, band, pn.buf_id);
+			return -1;
+#endif
 			/* behind the window */
 			if (pn.amsdu <= 1)
 				entry[3] = 0;
@@ -317,7 +307,10 @@ static s32 kite_classify(s32 buf_id, u32 len, u32 band)
 	wifi_cnt_inc(band, 64);
 	node = reorder_node_alloc(band, &pool, &idx);
 	if (node == 0) {
-		/* drop the frame, keep its buffer */
+		/* No reorder storage is available for this frame. */
+#ifdef EN7523
+		buf_id_free(0, band, pn.buf_id);
+#endif
 		wifi_cnt_inc(band, 80);
 		return -1;
 	}
@@ -923,3 +916,10 @@ void __attribute__((noreturn)) wifi_bridge_loop(void)
 {
 	npu_dbg_idle();
 }
+
+#if defined(EN7523) && defined(HAS_WIFI)
+s32 en7523_rx_classify(s32 id, u32 len, u32 band)
+{
+	return kite_classify(id, len, band);
+}
+#endif

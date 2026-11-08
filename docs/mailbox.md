@@ -154,13 +154,15 @@ share the table shape; each has its own handler set
 |  27 | inode stop           |     |     |                            |
 |  28 | PCIe swap            |     |     |                            |
 |  29 | rate limit           |     |     |                            |
-|  30 | HWNAT init (unsupported) | | | |
+|  30 | HWNAT init (EN7523 QDMA resource check) | | | |
 |  31 | chip info | | | |
 |  32 | TX buffer check address (unsupported) | | | |
 |  33 | token ID size (unsupported) | | | |
+|  34 | EN7523 station admission | | | |
+|  35 | EN7523 pairwise key state | | | |
 
 The canonical IDs are in `npu_wlan.h`, matching Linux's
-`airoha_offload.h`. Dispatch tables use designated indices. Commands 30, 32
+`airoha_offload.h`. Dispatch tables use designated indices. Command 30 outside EN7523, commands 32
 and 33 in SET_WAIT and 8 and 9 in GET_WAIT are reserved but have no handler;
 they return EOPNOTSUPP. The old placeholder MDC-lock handler returned success
 without a value, so it is not registered. The old private GET mapping-dump
@@ -171,13 +173,13 @@ semantics, described in [wireless.md](en7523/wireless.md). Its 24-byte host
 descriptor is selected explicitly by the matching mt76 profile.
 
 GET_WAIT_NPU_VERSION (10) works on every build, including NOWIFI. It returns
-one little-endian u32: major in bits 31:16, minor in bits 15:0. Both the boot
-banner and this reply use `NPU_VERSION_MAJOR`/`NPU_VERSION_MINOR`; the current
-value is `0x00070009` (7.9) on EN7523/MT7915 and `0x00070008` (7.8) on
-other builds. Version 7.9 adds independent PCIe/host queues for separate
-EN7523 MT7915 radios. The full suffix and Git revision remain in the
-banner and debug block. NOWIFI's GET_WAIT_NPU_INFO returns zero and does not
-advertise a WiFi datapath.
+one little-endian u32 with four bytes: major, minor, patch and build, from
+most to least significant. EN7523 MT7915 returns `0x070e0000` (7.14.0.0);
+other builds retain 7.13.0.0. Version 7.14 adds the native EN7523 PPE return
+lifetime and Ethernet/FoE exception metadata. The matching mt76 driver must
+recognize vendor word bit 28 before decoding raw radio frames. The full suffix
+and Git revision remain in the banner and debug block. NOWIFI's
+GET_WAIT_NPU_INFO returns zero and does not advertise a WiFi datapath.
 
 The previous firmware table put chip info at SET 30, MDC lock at GET 8,
 and mapping dump at GET 9. Use a matching host and firmware; those
@@ -185,6 +187,26 @@ legacy meanings are not aliases of the current commands. The kernel sends
 newer GETs on v1 too and lets firmware report unsupported commands. Mailbox
 requests are bounded by the host's 256-byte coherent buffer. The envelope is
 little-endian; command payloads keep their command-specific layout.
+
+### EN7523 7.13 receive controls
+
+Payload words below follow the two-word WLAN envelope, all little-endian.
+These extensions apply only to the EN7523 MT7915 build:
+
+| SET ID | Payload | Total request bytes |
+| ---: | --- | ---: |
+| 4 | WCID, TID, initial SSN, BA window (0 stops, maximum 256) | 24 |
+| 30 | one reserved word; validates Linux's existing QDMA resources | 12 |
+| 34 | WCID, enable (0/1), interface index (0..15), station MAC padded to 8 bytes, router MAC padded to 8 bytes | 36 |
+| 35 | WCID, key flags, 16 six-byte PN values in mt76 network byte order | 112 |
+
+Key flags have cipher in bits 7:0 (0 open, 1 CCMP-128, 2 unsupported), key
+index in bits 9:8, and bit 31 for pause-only. The pause request precedes
+programming the radio key; the full commit installs replay state and resumes
+RX. Disable station admission before deleting its host state. Unsupported
+stations/ciphers retain the raw host path. WCID is bounded to 1..150 per queue.
+GET DBG_COUNTER (3) returns four words: direct submissions, raw host frames,
+PN rejects and QDMA fallbacks (24 bytes including the envelope).
 
 The eagle bring-up order is in [wifi-eagle.md](wifi-eagle.md#bring-up).
 
@@ -242,7 +264,7 @@ The host holds the mailbox lock across stage and commit. CPU-direct SRAM
 programming remains available when no NPU endpoint supports the operation;
 a mailbox timeout must not trigger a competing CPU window access.
 
-EN7523 and AN7552 have 512 SRAM entries, AN7583 8192, AN7581 16384.
+EN7523 has 256 SRAM entries in 80-byte mode, AN7552 has 512, AN7583 8192, AN7581 16384.
 DRAM FoE entries remain in the host's coherent table. Further register
 setup details are in [tunnel.md](tunnel.md#ppe-and-hwnat).
 

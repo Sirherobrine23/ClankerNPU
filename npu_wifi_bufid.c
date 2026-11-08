@@ -76,7 +76,11 @@ NPU_HOT void buf_id_free(u32 type, u32 band, u32 buf_id)
 #if defined(WIFI_KITE) && !defined(HAS_BME)
 	(void)type;
 	(void)band;
+#ifdef EN7523
+	en7523_rx_free(buf_id);
+#else
 	buf_mgr_free(buf_id);
+#endif
 	return;
 #endif
 

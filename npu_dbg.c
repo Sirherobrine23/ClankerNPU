@@ -23,7 +23,13 @@ enum { NDBG_OK, NDBG_EUNKNOWN, NDBG_EARG, NDBG_ENOTSUP };
 
 static const char *const ndbg_names[16] = {
 	"mbox", "wifi", "tdma", "tunnel", "l4s", "ppe", "dba", "sram",
-	"trap", "", "", "", "", "", "", "stats",
+	"trap",
+#if defined(EN7523) && defined(HAS_WIFI)
+	"rx",
+#else
+	"",
+#endif
+	"", "", "", "", "", "stats",
 };
 
 extern u16 sram_alloc_table[];
@@ -56,6 +62,9 @@ void npu_dbg_init(void)
 	ndbg->harts = MAX_CORE_NUM;
 #ifdef NPU_DATAPATH_DBG
 	ndbg->print_mask = 1u << NDBG_STATS | 1u << NDBG_WIFI;
+#endif
+#if defined(EN7523) && defined(HAS_WIFI)
+	ndbg->print_mask |= 1u << NDBG_RX_LOG;
 #endif
 
 	i = 0;
@@ -343,6 +352,10 @@ void __attribute__((noreturn)) npu_dbg_idle(void)
 	npu_dbg_loop(NDBG_TAG('I', 'D', 'L', 'E'));
 	while (1) {
 		npu_dbg_poll();
+#if defined(EN7523) && defined(HAS_WIFI)
+		if (!get_hartid())
+			en7523_wifi_debug_poll();
+#endif
 		delay_us(10);
 	}
 }

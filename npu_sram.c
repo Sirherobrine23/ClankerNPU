@@ -203,6 +203,12 @@ static const struct sram_size_ent sram_size_hi[] = {
 #define SRAM_DEFAULT_SIZE  0x2000
 
 static const struct sram_size_ent sram_size_ext[] = {
+#if defined(EN7523) && defined(HAS_WIFI)
+	{ 43, 0x1000 }, /* QDMA descriptor indices and buffer ownership */
+	{ 44, 0xc000 }, /* station authorization and receive PN state */
+	{ 45, 0x5800 }, /* RX scatter chains indexed by buffer ID */
+	{ 46, 0x15e00 }, /* native PPE buffer ownership and exception queues */
+#endif
 	{  12, 0x01000 },	/* reorder primary index pool, 2000 u16 */
 	{  13, 0x02800 },	/* reorder secondary index pool, 5000 u16 */
 #if defined(HAS_EAGLE_STA_QLIMIT) && defined(USE_CLANKER_DRIVER)

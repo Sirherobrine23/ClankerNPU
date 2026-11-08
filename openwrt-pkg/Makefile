@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=airoha-npu-firmware
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=6
+PKG_RELEASE:=10
 
 PKG_TOOLCHAIN_ARCH:=riscv64
 PKG_TOOLCHAIN_TARGET:=riscv64-unknown-elf

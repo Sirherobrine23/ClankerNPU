@@ -8,10 +8,12 @@ scheduling from the ARM host on AN75xx. EN7523 provides core services, mailbox c
 transport for mt76, with one DBDC device or two separate PCIe radios.
 Firmware 7.10 uses reserved GDMA channels 0/1 for host transfers and
 provides PPE initialization and FoE SRAM programming on every SoC.
-EN7523 firmware 7.11 batches RX notifications. Its OpenWrt profile combines
-NPU RX, host security/reordering, CPU-assisted PPE ingress and WED TX.
-The Askey ingress and return path have been tested on hardware; direct
-PPE-to-WED WiFi egress still needs validation. WED is enabled by default
+EN7523 firmware 7.13 adds NPU BA/CCMP validation and direct routed IPv4
+submission to QDMA/PPE, retaining batched GDMA host exceptions and WED TX.
+The new direct ingress path has linked-image model coverage; hardware CPU
+measurements are still required.
+The earlier CPU-assisted Askey ingress and return path passed hardware tests;
+direct PPE-to-WED WiFi egress still needs validation. WED is enabled by default
 in the OpenWrt mt7615, mt7915 and mt7996 drivers, with `wed_enable=0`
 available as an explicit opt-out.
 
@@ -19,7 +21,7 @@ available as an explicit opt-out.
 
 | SoC    | Harts |   SRAM | WiFi chips                           | Extra features           |
 | ------ | ----: | -----: | ------------------------------------ | ------------------------ |
-| EN7523 |     4 | 384 KB | MT7915, none                         | GDMA RX, PPE control     |
+| EN7523 |     4 | 384 KB | MT7915, none                         | direct RX, PPE control     |
 | AN7552 |     2 | 256 KB | MT7916, MT7991, MT7993               | none                     |
 | AN7581 |     8 | 480 KB | MT7916, MT7992, MT7996               | tunnel offload, TR-471   |
 | AN7583 |     6 | 512 KB | MT7916, MT7992, MT7993, MT7996, none | tunnel offload, GPON DBA |
@@ -266,7 +268,9 @@ Feature flags from `npu_config.h`:
 runtime. NOWIFI is the default. Startup, traps, mailbox, native interrupts,
 mutexes and timers use the common firmware sources and linker script.
 The firmware uses the SDK mailbox and the ordinary kernel loader.
-TDMA, host-adaptor, WiFi and PPE offload remain unimplemented for EN7523;
-unsupported commands return failure.
+EN7523 uses its own MT7915 receive transport, reserved GDMA channels and
+LAN QDMA ring 6 instead of TDMA/BME. Hart 3 drains QDMA completions in the
+MT7915 build; NOWIFI keeps its idle loop. PPE/FoE control uses slot 5.
+Unsupported commands return EOPNOTSUPP.
 See [docs/en7523/runtime.md](docs/en7523/runtime.md) for installation, host
 tools, memory reservations and hardware-validation limits.

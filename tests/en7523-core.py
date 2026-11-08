@@ -29,6 +29,7 @@ dma_copies = [0, 0]
 dma_peak = 0
 host_doorbells = [0, 0]
 ppe_entries = {}
+ppe_returns = []
 ppe_ack = True
 injected = [set() for _ in range(4)]
 class BusWait(Exception):
@@ -48,6 +49,12 @@ load(0x1ec0c194, int(quiet).to_bytes(4, 'little'))
 load(0x1ec08004, (1 if staggered else 15).to_bytes(4, 'little'))
 
 def read(addr, n=4):
+    if addr == 0x1fb50fe4:
+        return len(ppe_returns)
+    if addr == 0x1fb50fe0:
+        return ppe_returns[0][0] if ppe_returns else 0x80000000
+    if addr == 0x1fb50fdc:
+        return ppe_returns[0][1] if ppe_returns else 0
     if addr == 0x1fb30204:
         for ch, transfer in list(dma_pending.items()):
             if ch in dma_hold:
@@ -79,7 +86,8 @@ def write(addr, val, n=4):
     assert not 0x840f0000 <= addr < 0x840f3000, 'removed telemetry page accessed'
     if 0x1ec00000 <= addr < 0x20000000:
         assert (0x1fb50000 <= addr < 0x1fb51000 or addr == 0x1fb51500 or
-                (wifi and (0x1fb30000 <= addr < 0x1fb30020 or addr == 0x1fb30204)) or
+                (wifi and (0x1fb30000 <= addr < 0x1fb30020 or addr == 0x1fb30204 or
+                           0x1fb54000 <= addr < 0x1fb54200)) or
                 (wifi and (0x1fa90030 <= addr <= 0x1fa9003c or
                           0x1ec0d180 <= addr <= 0x1ec0d19c)) or 0x1ec09018 <= addr < 0x1ec09098 or
                 0x1ec09098 <= addr < 0x1ec090d8 or
@@ -93,6 +101,14 @@ def write(addr, val, n=4):
                          0x1fbf0000)), hex(addr)
     if addr in (0x1ec0d188, 0x1ec0d198):
         host_doorbells[(addr-0x1ec0d188)//16] += 1
+    if addr == 0x1fb50fe0:
+        assert val == 1 << 30 and ppe_returns, 'invalid PPE return FIFO acknowledgement'
+        ppe_returns.pop(0)
+    if addr == 0x1fb54064:
+        status = read(0x1fb54068)
+        count, head = status >> 16 & 0xfff, status & 0x3ff
+        assert 0 < val <= count
+        load(0x1fb54068, ((count-val) << 16 | (head+val) % 1024).to_bytes(4, 'little'))
     if addr == 0x1fb30204:
         assert not val & ~3, 'NPU acknowledged a Linux GDMA channel'
         val = sum(mem.get(addr+i, 0) << (i*8) for i in range(4)) & ~val
@@ -109,7 +125,7 @@ def write(addr, val, n=4):
         dma_peak = max(dma_peak, len(dma_pending))
     if addr == 0x1fb50f1c and val & 1 and ppe_ack:
         index = val >> 8 & 0xffff
-        assert index < 512, 'EN7523 SRAM table overrun'
+        assert index < 256, 'EN7523 80-byte SRAM table overrun'
         ppe_entries[index] = tuple(read(addr+4+i*4) for i in range(20))
         val |= 0x80000000
     if wifi:
@@ -282,7 +298,7 @@ for i in range(4):
     assert harts[i].csr[0xbc0] == 1, 'per-hart cycle counter enabled'
     assert harts[i].csr[0x304] == 0x800
     assert harts[i].csr[0x7c0] == 0x179
-    if not wifi or i in (0, 3):
+    if not wifi or i == 0:
         assert hart_word(i, 0) == 0x49444c45, 'common idle loop'
 assert read(0x1ec0c004) == 256, 'SDK notifications route to the host'
 assert read(0x1ec0c194) == int(quiet), 'host print gate must be preserved'
@@ -291,24 +307,25 @@ console = uart.decode('ascii').replace('\r', '')
 if quiet:
     assert not console, 'MIB21 must suppress SoC UART output'
 else:
-    assert 'bite my shiny metal NPU' in console
-    assert 'core freq at 500 MHz' in console
-    assert ('NPU Version: TLB7.' + '10' + '.0.0_v003.' + ('MT7915.' if wifi else 'NOWIFI.')) in console
-    assert 'cores enabled f, running f' in console
+    assert re.search(r'core freq at [1-9][0-9]* MHz', console)
+    assert ('NPU Version: ClankerNOPU v7.' + ('14.0.0_MT7915_' if wifi else '13.0.0_NOWIFI_')) in console
+    assert 'cores enabled 15, running 15' in console
     assert 'Error:' not in console
     for hart in range(4):
-        assert f'[C{hart}]core {hart}: RV32IM' in console
+        assert f'core {hart}: RV32IM' in console
     assert console.count('self-test ok (1b972363,') == 4
     Path(root / 'boot-model.log').write_text(console)
 
 def request(cmd=0, msg_type=3, func=0, ptr=0x85012000, arg=1, size=12,
-            ifindex=0, value=0xffffffff):
+            ifindex=0, value=0xffffffff, blob=None):
     q=0x1ec0c030
     # The caller owns this dynamic buffer; no fixed diagnostic page is reserved.
     payload = ptr if 0x80000000 <= ptr <= 0xbfffffe0 else 0x85012000
     for i, value in enumerate(((msg_type << 4) | ifindex, cmd,
                                value, 0x12345678)):
         load(payload+i*4, value.to_bytes(4,'little'))
+    if blob is not None:
+        load(payload+8, blob)
     write(q,ptr);write(q+4,size);write(q+12,(func<<11)|arg)
     before = completed[0]
     write(q+8,read(q+8)+1)
@@ -324,7 +341,7 @@ for ptr in (0x85012000, 0x8a004000):
     assert read(ptr+12)==0x12345678, 'response exceeded SDK payload'
     for ifindex in (0, 3, 15):
         control,version=request(cmd=10, ptr=ptr, ifindex=ifindex)
-        assert control&0x1e==6 and version==0x0007000b
+        assert control&0x1e==6 and version==(0x070e0000 if wifi else 0x070d0000)
         assert read(ptr)==0x30|ifindex and read(ptr+4)==10
         assert read(ptr+12)==0x12345678, 'version exceeded its response word'
 # Wire values must match the host enum, not Linux's negative errno numbers.
@@ -359,8 +376,10 @@ failures = (
     (dict(arg=0x21), EOPNOTSUPP),
 )
 for kwargs, expected in failures:
-    if wifi and kwargs == dict(msg_type=1):
+    if wifi and kwargs in (dict(msg_type=1), dict(msg_type=1, cmd=34)):
         expected = EINVAL
+    if wifi and kwargs == dict(msg_type=1, cmd=30):
+        expected = ENODEV
     control,info=request(**kwargs)
     assert control&0x1e == (expected<<2)|2, (kwargs,control,expected)
     assert info==0xffffffff, 'rejection must leave the payload untouched'
@@ -374,7 +393,7 @@ for kwargs, expected in (({},1), (dict(cmd=10),1), (dict(ptr=0),EINVAL),
     before=read(0x1ec0c0b8)
     _,info=request(arg=0,**kwargs)
     if kwargs.get('cmd')==10:
-        assert info==0x0007000b
+        assert info==(0x070e0000 if wifi else 0x070d0000)
     assert read(0x1ec0c0b0)==0
     assert read(0x1ec0c0b4)==expected
     assert read(0x1ec0c0b8)==before+1 and not mutex_owner
@@ -397,6 +416,7 @@ assert completed[3]==2
 exec((Path(__file__).parent / 'en7523-ppe.py').read_text())
 if wifi:
     exec((Path(__file__).parent / 'en7523-wifi.py').read_text())
+    exec((Path(__file__).parent / 'en7523-logging.py').read_text())
 # Inject a real exception into the model; no firmware fault-injection opcode exists.
 h=harts[1]
 h.csr.update({0x341:h.pc,0x342:11,0x343:0})

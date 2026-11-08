@@ -405,7 +405,12 @@ static void ppe_tb_sel(u32 sel)
 /* Table size, bits 26:24 of the table config: 1024 << n entries. On
  * AN7581 the table spans both PPEs' SRAM, 16384 entries, as the stock
  * image has it; PPE1's entries are 0x2000 and up. */
-#if defined(EN7523) || defined(AN7552)
+#if defined(EN7523)
+/* EN7523's 80-byte format halves the on-chip table to 256 entries. */
+#define PPE_TB_SIZE		0x6000000
+#define PPE_TB_ENTRIES		256
+#define PPE_TB_SIZE_PPE1	0
+#elif defined(AN7552)
 #define PPE_TB_SIZE		0x7000000
 #define PPE_TB_ENTRIES		512
 #define PPE_TB_SIZE_PPE1	0
@@ -470,9 +475,13 @@ static void ppe_enable_config(u32 sel)
 
 	if (chip_rev == 10 || chip_rev == 12 || chip_rev == 14 ||
 	    chip_rev == 15 || chip_rev == 16) {
+#ifdef EN7523
+		REG32(PPE0_MISC) |= 8u;
+#else
 		REG32(PPE0_MISC) &= ~8u;
 		if (chip_rev == 14)
 			REG32(PPE1_MISC) &= ~8u;
+#endif
 	} else {
 		switch (hwnat_ppe_type) {
 		case 1:

@@ -147,10 +147,18 @@ void delay_1ms(u32 ms)
 }
 
 /* PLL clock: selector picks a frequency, bits[2:0]+1 is the divider */
+#if defined(EN7523)
+#define PLL_CFG_REG 0x1FA201BC
+#else
 #define PLL_CFG_REG 0x1FA201FC
+#endif
+
 #if defined(AN7583)
 #define PLL_SEL_SHIFT   9
 #define PLL_FREQ_TABLE  { 666, 800, 720, 600 }
+#elif defined(EN7523)
+#define PLL_SEL_SHIFT   8
+#define PLL_FREQ_TABLE  { 500, 540 }
 #else
 #define PLL_SEL_SHIFT   8
 #define PLL_FREQ_TABLE  { 800, 750, 720, 600 }
@@ -158,16 +166,14 @@ void delay_1ms(u32 ms)
 
 u32 cpu_clock_get(void)
 {
+	static const u32 pll_freq[] = PLL_FREQ_TABLE;
+	u32 cfg = REG32(PLL_CFG_REG);
+	
 #ifdef EN7523
-	u32 cfg = REG32(0x1fa201bc);
-	static const u32 en7523_pll_mhz[] = { 500, 540 };
-
 	if (sim_mode_flag)
 		return 64;
-	return en7523_pll_mhz[(cfg >> 8) & 1] / ((cfg & 7) + 1);
+	return pll_freq[(cfg >> PLL_SEL_SHIFT) & 1] / ((cfg & 7) + 1);
 #else
-	static const u32 pll_freq[] = PLL_FREQ_TABLE;
-
 	if (sim_mode_flag != 0)
 		return 100;
 	return pll_freq[(REG32(PLL_CFG_REG) >> PLL_SEL_SHIFT) & 3] /

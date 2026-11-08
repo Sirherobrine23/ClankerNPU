@@ -302,14 +302,30 @@ int npu_printf(const char *fmt, ...)
 	len = npu_vsprintf(printf_buf, fmt, (u32 *)ap);
 	__builtin_va_end(ap);
 
+	{
+		
+	}
+	
 	/* "[Cn]" prefix; a cleared flag skips it once */
 	if (!npu_printf_prefix) {
 		npu_printf_prefix = 1;
 	} else {
+		// [    6.817697]
 		uart_putc('[');
+		uart_putc(' ');
+		uart_putc(' ');
+		uart_putc('N');
+		uart_putc('P');
+		uart_putc('U');
+		uart_putc(' ');
 		uart_putc('C');
+		uart_putc('O');
+		uart_putc('R');
+		uart_putc('E');
+		uart_putc(' ');
 		uart_putc(get_core_char());
 		uart_putc(']');
+		uart_putc(' ');
 	}
 
 	/* output with LF→CRLF conversion */

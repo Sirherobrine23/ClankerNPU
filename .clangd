@@ -12,6 +12,11 @@ CompileFlags:
     - -fno-builtin
     - -nostdlib
     - -DEN7523
-    - -DNOWIFI
-    - '-DNPU_WIFI_NAME="NOWIFI"'
+    - -DMT7915
+    - '-DNPU_WIFI_NAME="MT7915"'
     - '-DNPU_GIT_REV="clangd"'
+
+    - -DNPU_VERSION_MAJOR=7
+    - -DNPU_VERSION_MINOR=13
+    - -DNPU_VERSION_PATCH=0
+    - -DNPU_VERSION_BUILD=0

@@ -20,6 +20,29 @@ flowchart LR
   FE -->|"PPE buffer return (eagle)<br/>BME ring (kite)"| Q
 ```
 
+## EN7523 direct MT7915 ingress
+
+Firmware 7.14 detaches completed radio buffers, refills RX with a new ID and
+keeps the old ID through BA reordering and native PPE forwarding. TX ring 6
+(`0x1fb541c0`, CPU index `0x1fb541c8`) has 1024 coherent 32-byte descriptors,
+allocated by Linux and reserved from host TX. Message words are the vendor
+NPU profile: `0x80000000 | buf_id << 14` and `0x7f4087ff`; Ethernet payloads
+retain their original header without a private Linux VLAN tag.
+
+Completion queue 1 uses QDMA offsets `0x48/0x4c` and `0x64/0x68`.
+Hart 3 recycles completed descriptor indices, but keeps the packet buffer
+until the separate PPE return FIFO supplies its ID. FIFO INFO/DATA/COUNT
+are at `0x1fb50fdc/0x1fb50fe0/0x1fb50fe4`. Writing DATA bit 30 acknowledges
+one entry. Both event orders are supported; neither event alone frees a
+buffer. Hardware mutex 31 protects ownership and per-band exception queues.
+
+Successful forwarding produces no ARM host copy. Each RX hart drains its own
+Ethernet exceptions using reserved GDMA channel 0 or 1, preserving the FoE
+hash, CPU reason and vif. Raw control/security exceptions retain the existing
+radio format. STOP retains host storage until native ownership retires, and
+STA/key generations reject delayed returns after state changes. Invalid FIFO
+IDs are counted and acknowledged without releasing unrelated buffers.
+
 ## Host adaptor
 
 `hostadpt_init` (core 0) waits until the host has written the ring

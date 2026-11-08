@@ -37,7 +37,7 @@ void dbg_cnt_isr(int src)
 
 int wifi_mail_get_npu_version(u32 *msg)
 {
-	msg[2] = NPU_VERSION_CODE;
+	msg[2] = NPU_VERSION_CODE(NPU_VERSION_MAJOR, NPU_VERSION_MINOR, NPU_VERSION_PATCH, NPU_VERSION_BUILD);
 	return NPU_MBOX_SUCCESS;
 }
 
@@ -84,6 +84,16 @@ int wifi_mail_dispatch(u32 base, u32 cnt)
 	if (!base || (base & 3) || cnt < 12)
 		return NPU_MBOX_EINVAL;
 	msg = (u32 *)((base & 0x3FFFFFFF) | NPU_ADDR_MASK);
+#endif
+#if defined(EN7523) && defined(HAS_WIFI)
+	if (((msg[0] >> 4) & 15) == 1 &&
+	    ((msg[1] == WLAN_FUNC_SET_WAIT_EN7523_STA && cnt < 36) ||
+	     (msg[1] == WLAN_FUNC_SET_WAIT_EN7523_KEY && cnt < 112) ||
+	     (msg[1] == WLAN_FUNC_SET_WAIT_BA_WIN_SIZE && cnt < 24)))
+		return NPU_MBOX_EINVAL;
+	if (((msg[0] >> 4) & 15) == 3 &&
+	    msg[1] == WLAN_FUNC_GET_WAIT_DBG_COUNTER && cnt < 24)
+		return NPU_MBOX_EINVAL;
 #endif
 	func_type = (msg[0] >> 4) & 0xF;
 #ifdef NPU_MAIL_TRACE

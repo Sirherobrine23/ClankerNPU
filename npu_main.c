@@ -94,33 +94,6 @@ static void npu_reboot(void)
  * Per-core main functions
  * ================================================================ */
 
-static const char *const bender[] = {
-	"       _",
-	"      ( )",
-	"       H",
-	"      _H_",
-	"   .-'-.-'-.",
-	"  /         \\",
-	" |  .-------'._",
-	" | / /  '.' '. \\",
-	" | \\ \\ @   @ / /",
-	" |  '---------'",
-	" |    _______|",
-	" |  .'-+-+-+|",
-	" |  '.-+-+-+|",
-	" '-.__   __.-'",
-	"      \"\"\"",
-	"  bite my shiny metal NPU",
-};
-
-static void npu_banner(void)
-{
-	u32 i;
-
-	for (i = 0; i < sizeof(bender) / sizeof(bender[0]); i++)
-		npu_printf("%s\n", bender[i]);
-}
-
 /* A slot runs when its PC is ever nonzero; one that never fetched reads 0. */
 static void npu_core_probe(void)
 {
@@ -140,10 +113,10 @@ static void npu_core_probe(void)
 		for (i = 0; i < 4 && !(live & (1u << c)); i++)
 			if (REG32(NPU_CSR_PC(c)) != 0)
 				live |= 1u << c;
-	npu_printf("NPU cluster %x: cores enabled %x, running %x\n",
+	npu_printf("NPU cluster 0x%x: cores enabled %d, running %d\n",
 		   REG32(CR_CLUSTER_VERSION), en, live);
 	if (live != (1u << MAX_CORE_NUM) - 1)
-		npu_printf("Error: %d cores expected, running %x\n",
+		npu_printf("Error: %d cores expected, running %d\n",
 			   MAX_CORE_NUM, live);
 }
 
@@ -398,8 +371,14 @@ void core_dispatch(int a0, int a1)
 	(void)a1;
 
 #ifdef EN7523
+	u32 core = get_hartid();
+#endif
+
+	npu_printf("core %d: dispatching\n", core);
+
+#ifdef EN7523
 #ifdef HAS_WIFI
-	switch (get_hartid()) {
+	switch (core) {
 	case 0:
 		en7523_wifi_init();
 		break;
@@ -408,6 +387,9 @@ void core_dispatch(int a0, int a1)
 		break;
 	case 2:
 		en7523_wifi_rx_loop(1);
+		break;
+	case 3:
+		en7523_qdma_loop();
 		break;
 	}
 #endif
@@ -661,7 +643,6 @@ void npu_init(void)
 		plic_global_init();
 #endif
 		REG32(NPU_MIB21) = mib21;
-		npu_banner();
 		npu_printf("core freq at %d MHz\n", cpu_clock_get());
 		npu_printf("NPU Version: %s\n", NPU_VERSION);
 		npu_core_probe();

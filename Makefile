@@ -22,6 +22,11 @@ CLANKER ?= 0
 # git short hash in the boot version line; pin it to compare images
 GITREV ?= $(shell git describe --always --dirty --abbrev=7 2>/dev/null || echo nogit)
 
+NPU_VERSION_MAJOR  := 7
+NPU_VERSION_MINOR  := $(if $(filter EN7523_MT7915,$(SOC)_$(WIFI)),14,13)
+NPU_VERSION_REV    := 0
+NPU_VERSION_STABLE := 0
+
 ifeq ($(SOC),EN7523)
 ifeq ($(filter $(WIFI),NOWIFI MT7915),)
 $(error EN7523 supports NOWIFI or MT7915)
@@ -34,7 +39,10 @@ CFLAGS  := $(ARCH) -Os -ffunction-sections -fdata-sections \
            -fno-builtin -ffreestanding -nostdlib \
            -Wall -Wno-unused-function \
            -D$(SOC) -D$(WIFI) -DNPU_WIFI_NAME='"$(WIFI)"' \
-           -DNPU_GIT_REV='"$(GITREV)"' $(if $(filter 1,$(MAILTRACE)),-DNPU_MAIL_TRACE) \
+           -DNPU_GIT_REV='"$(GITREV)"' \
+           -DNPU_VERSION_MAJOR='$(NPU_VERSION_MAJOR)' -DNPU_VERSION_MINOR='$(NPU_VERSION_MINOR)' \
+           -DNPU_VERSION_PATCH='$(NPU_VERSION_REV)' -DNPU_VERSION_BUILD='$(NPU_VERSION_STABLE)' \
+           $(if $(filter 1,$(MAILTRACE)),-DNPU_MAIL_TRACE) \
            $(if $(filter 0,$(NPUTX)),-DEAGLE_NO_TX_PUSH) \
            $(if $(filter 1,$(NPUDBG)),-DNPU_DATAPATH_DBG) \
            $(if $(filter 1,$(PROF)),-DNPU_PROFILE) \
@@ -64,7 +72,7 @@ SRCS_C  := npu_globals.c \
            npu_dba.c npu_tr471.c npu_dbg.c \
            npu_wifi.c npu_wifi_bufid.c npu_wifi_fwd.c npu_wifi_ba.c \
            npu_wifi_rx.c npu_wifi_init.c \
-           npu_wifi_en7523.c npu_wifi_kite.c npu_wifi_eagle.c npu_wifi_eagle_dp.c \
+           npu_wifi_en7523.c npu_qdma_en7523.c npu_rx_en7523.c npu_wifi_kite.c npu_wifi_eagle.c npu_wifi_eagle_dp.c \
            npu_tdma.c npu_hostadpt.c npu_sta_q.c \
            npu_tunnel.c npu_ppe.c npu_l4s.c
 OBJS    := $(patsubst %.S,$(BUILD)/%.o,$(SRCS_S)) \
@@ -91,7 +99,7 @@ $(BUILD)/%.o: %.S npu_config.h $(FLAGS) | $(BUILD)
 	$(CC) $(ASFLAGS) -c -o $@ $<
 
 $(BUILD)/%.o: %.c npu_config.h npu_regs.h npu_types.h npu_internal.h \
-		 npu_wifi.h npu_wlan.h $(FLAGS) | $(BUILD)
+		 npu_wifi.h npu_wifi_en7523.h npu_wlan.h $(FLAGS) | $(BUILD)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 

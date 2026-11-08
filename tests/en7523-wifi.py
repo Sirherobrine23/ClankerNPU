@@ -9,8 +9,8 @@ def set_cmd(cmd, value, band=0, expected=1):
     ctrl,_=request(cmd=cmd, msg_type=1, ifindex=band, value=value)
     assert ctrl&0x1e==(expected<<2)|2,(cmd,value,band,hex(ctrl))
 
-set_cmd(12,0,expected=EOPNOTSUPP)
-set_cmd(4,1,expected=EOPNOTSUPP)
+set_cmd(12,0)
+set_cmd(4,1,expected=EINVAL)
 set_cmd(1,1537,expected=EINVAL)
 set_cmd(2,1,expected=ENODEV)
 rings=[]
@@ -64,7 +64,7 @@ def packet(band, blob, last=True):
 def body(length):
     return length.to_bytes(4,'little')+bytes((i*13+7)&255 for i in range(length-4))
 
-def check_host(band,index,blob,total,part,parts,last):
+def check_host(band,index,blob,total,part,parts,last,vendor=0):
     d=host[band]+index*24
     ctrl=read(d)
     assert ctrl&1 and (ctrl>>1)&0x3fff==total
@@ -74,7 +74,7 @@ def check_host(band,index,blob,total,part,parts,last):
     assert (info>>26)&7==part and (info>>29)&7==parts
     addr=read(d+12)
     assert bytes(read(addr+i,1) for i in range(len(blob)))==blob
-    assert read(d+8)==0 and read(d+16)==0 and read(d+20)==0
+    assert read(d+8)==vendor and read(d+16)==0 and read(d+20)==0
     load(d,b'\0'*12)
 
 # Split consumers may probe in either order, without the other host ring.
@@ -117,7 +117,11 @@ for i,offset in enumerate(range(0,len(blob),3500)):
     segment=blob[offset:offset+3500]
     last=offset+len(segment)==len(blob)
     packet(0,segment,last)
-    check_host(0,1+i,segment,len(blob),1+i,3,last)
+    if not last:
+        assert read(0x1ec0d188)==1, 'incomplete frame reached the host'
+for i,offset in enumerate(range(0,len(blob),3500)):
+    segment=blob[offset:offset+3500]
+    check_host(0,1+i,segment,len(blob),1+i,3,i==2)
 
 # A host-owned descriptor must never be overwritten.
 head=read(0x1ec0d188)
@@ -191,6 +195,8 @@ before = host_doorbells[:]
 tick(1000)
 assert host_doorbells == before, 'idle workers generated host interrupts'
 print('PASS: 37 RX frames use two host doorbells; idle workers do not notify')
+
+exec((Path(__file__).parent / 'en7523-direct-rx.py').read_text())
 
 # STOP must also wait for a copy that was already in flight.
 band=0

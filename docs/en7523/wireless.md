@@ -54,23 +54,66 @@ with the second band offset by `0x6020`. The common allocator determines the
 actual base. The packet reservation must hold 5600 buffers of 4096 bytes.
 PCIe windows use the v1 SCU registers, not AN75xx aliases.
 
-Hart 1 drains band 0; hart 2 drains band 1 and services the common timer.
-Each worker copies received bytes to its host ring, then returns the radio
-descriptor with a 3500-byte buffer and publishes its CPU index. Hart 3 stays
-in the common idle loop. This path does not use TDMA, BME, hardware BMGR or
-the AN75xx bridge. Firmware 7.10 copies raw bytes with coherent GDMA: channel 0 for queue 0,
-channel 1 for queue 1. The two workers never share an active channel.
-CPU descriptor accesses retain the v1 uncached boot mapping.
+Hart 1 drains queue 0; hart 2 drains queue 1 and services the common timer.
+A worker detaches each completed packet buffer and refills the radio descriptor
+with a different ID. Buffers remain owned until host copying finishes, or both
+QDMA completion and the native PPE buffer return have arrived. Scattered radio buffers are chained;
+only a complete frame enters parsing or the host transport.
 
-Firmware 7.11 drains up to 32 descriptors before publishing the host producer
-index. A short burst is flushed immediately when the radio ring empties.
-Idle workers do not write doorbells. STOP waits through the final publication.
+Firmware 7.13 adds direct routed IPv4 ingress for authorized AP stations with
+open security or hardware-decrypted CCMP-128, WCID 1..150 and TID 0..7,
+with an active negotiated BA session. Without BA, host duplicate filtering
+remains in charge and the packet keeps the raw host path.
+The source Ethernet address must match the station and the destination must
+match the router address supplied by mt76. This leaves intra-BSS/bridged
+traffic, multicast, VLAN frames, ARP, EAPOL, unsupported ciphers, translation
+errors and multi-buffer frames on the normal host path. MT7916 is not an
+EN7523 build target yet.
 
-The host receives raw MT7915 RX headers and payloads. Firmware control,
-BA reorder, PN checks and checksum validation remain with mt76/mac80211. The slot-5 control path initializes the PPE and commits 80-byte FoE
-entries for the host Ethernet driver. Raw WiFi frames still reach host
-reorder and PN validation; this does not bypass mac80211 or implement a
-direct raw-WiFi-to-PPE forwarding path.
+The NPU owns the negotiated BA receive window and checks CCMP key index and
+PN after reordering. A-MSDU members may share a PN only while continuing the
+same sequence. Old sequence numbers and replayed PNs are discarded. Fragments
+remain raw for host defragmentation and share the replay counter. mt76 also
+retains mac80211 PN validation for fragments: reassembly requires its sequential
+PN and key-color checks even when the NPU has already rejected replays. Missing
+sequence gaps expire after more than three 10 ms ticks. Key installation is
+bracketed by a worker pause and a commit that discards pending radio RX,
+flushes held frames against the old replay state and installs the new state.
+Station revocation disables direct forwarding before its BA queues are drained.
+
+Firmware 7.14 keeps eligible frames in their original packet buffer, without
+inserting a private VLAN. TX ring 6 uses the vendor NPU message words:
+`0x80000000 | buf_id << 14` and `0x7f4087ff`. Hart 3 drains completion queue 1
+and the PPE return FIFO (`INFO=0x1fb50fdc`, `DATA=0x1fb50fe0`,
+`COUNT=0x1fb50fe4`). It acknowledges the current FIFO head with bit 30 of
+DATA only after reading its metadata. A packet remains owned until both its
+QDMA descriptor has completed and the PPE has returned its buffer ID.
+Descriptor indices can be recycled independently of packet buffers.
+
+A successful forwarding return frees the buffer without notifying the ARM.
+An exception is queued to its original RX hart, which copies the Ethernet
+frame to its host ring and carries the FoE hash and CPU reason. mt76 hands
+these frames to `airoha_npu_rx_skb()` on the original AP netdev; the PPE can
+bind the learned tuple before GRO. These exceptions bypass the mt76 ingress
+hook to avoid re-injection into the PPE. Raw control, unsupported and
+unvalidated frames still take the original mac80211 path. A duplicate
+old-header keepalive is discarded because the original was already forwarded.
+
+STA/key generations reject delayed exceptions across rekey or station reuse.
+STOP also waits for native PPE ownership to retire; a failed STOP keeps host
+DMA storage pinned. Full host rings drop exceptions without overwriting an
+owned descriptor. An Ethernet/QDMA resource reset requires a reboot.
+
+The slot-5 control path remains a Clanker extension. Until the first TC flow
+setup has initialized the PPE, admitted frames retain the raw host fallback. EN7523 uses 80-byte FoE
+entries with 256 SRAM entries and a 16K DRAM table. WED TX is a separate
+WiFi egress path; the native RX path does not remove host work on WiFi TX.
+
+Raw exceptions use coherent GDMA channel 0 or 1 for their queue. Firmware 7.11's
+32-descriptor notification batching is retained, with immediate flush when the
+radio empties and no idle doorbells. STOP waits through final publication.
+CPU descriptor accesses retain the v1 uncached boot mapping. EN7523 does not
+use TDMA, BME, hardware BMGR or the AN75xx bridge.
 
 ## Host descriptor and control
 
@@ -87,16 +130,28 @@ The firmware preserves them. Word 0 is published last, before the DMA index:
 | Fragment number, starting at 1 | word 1, bits 28:26 |
 | Fragment count | word 1, bits 31:29 |
 
-Word 2 is zero. Frames up to 16383 bytes can span multiple host entries.
+Word 2 carries NPU checks: bit 31 means BA processing is complete, bit 30
+means CCMP PN validation is complete, and bit 29 bypasses host BA processing
+for a fragment. Bit 28 identifies a validated Ethernet PPE exception: word 1
+bits 15:0 carry the vif index, while word 2 bits 14:0 carry the hardware FoE
+hash and bits 20:16 the CPU reason. The host handles that format before
+attempting to decode a radio RX descriptor. These frames are never submitted
+to mac80211 a second time. Other raw frames have zero. mt76 consumes these bits only on its
+NPU queues and avoids repeating completed checks. Translated A-MSDU exceptions
+are delivered as individual Ethernet frames because other members may have
+taken the direct path. Frames up to 16383 bytes can span multiple host entries.
 An owned/full entry drops the incoming frame without overwriting host data.
 The driver copies completed fragments into an skb before clearing Done.
 
 The supported SET IDs are PCIE_ADDR (0), DESC (1), NPU_INIT_DONE (2),
-DRIVER_MODEL (5), PKT_BUF_ADDR (8), IS_FORCE_TO_CPU (12, value 1 only) and
-PCIE_PORT_TYPE (14). Supported GETs are NPU_INFO (0), RXDESC_BASE (4) and
-NPU_VERSION (10). WLAN BA, TX and HWNAT command 30 remain unsupported.
-PPE initialization and FoE table operations use the normal slot-5 HWNAT
-mailbox instead, including on the NOWIFI image; see [mailbox.md](../mailbox.md).
+BA_WIN_SIZE (4, extended EN7523 payload), DRIVER_MODEL (5), PKT_BUF_ADDR (8),
+IS_FORCE_TO_CPU (12), PCIE_PORT_TYPE (14), HWNAT_INIT (30, QDMA resource check),
+EN7523_STA (34) and EN7523_KEY (35). Value 0 of IS_FORCE_TO_CPU enables the
+admission checks; it cannot bypass authorization or replay validation.
+Supported GETs include NPU_INFO (0), DBG_COUNTER (3, four per-queue counters),
+RXDESC_BASE (4) and NPU_VERSION (10). The counters are QDMA submissions, raw
+host frames, rejected PNs and full/unavailable QDMA fallbacks. They are shown
+in mt76's `npu_rx` debugfs file. See [mailbox.md](../mailbox.md) for payloads.
 
 The host prepares its radio rings, publishes all host rings owned by that
 device and only then sends NPU_INIT_DONE=1 for each queue. Separate radios
@@ -110,6 +165,33 @@ remain unavailable until reboot, including after a failed probe.
 
 ## Validation
 
+Firmware 7.14 was RAM-booted on the Askey RTF8225VW on 2026-11-07, with
+the preceding configuration restored, GPON in O5 and the notebook associated
+with PCIe1's 5 GHz AP. TCP tests explicitly routed `172.16.0.1/32` through
+the WiFi interface and the Askey, avoiding the notebook's separate wired
+default route. The firmware, kernel helper and mt76 came from the same
+verified initramfs image. Ten-second runs before and after that boot gave:
+
+| Direction | Previous image | Native PPE 7.14 | ARM CPU busy before / after |
+| --- | --- | --- | --- |
+| WiFi to GPON | 147.3 Mbit/s | 146.6 Mbit/s | 35.7% / 30.2% |
+| GPON to WiFi | 402.3 Mbit/s | 520.4 Mbit/s | 55.6% / 76.1% |
+
+CPU busy is the aggregate `/proc/stat` delta across both ARM cores during
+each run. Upload softirq time fell from 8.6% to 6.5%. The native upload
+submitted 128227 packets and delivered 1041 packets through the NPU host
+ring, including control traffic and exceptions. The final idle UART snapshot
+showed all 150616 submissions completed and returned, 1156 exceptions,
+zero pending buffers, zero invalid returns and zero exception host drops.
+PPE dumps during traffic showed a bound upstream NAT tuple. No panic was
+observed during these runs.
+
+These short RF measurements demonstrate native ingress and lower upload
+CPU usage, not a general bidirectional CPU reduction. Download consumed more
+CPU at its higher throughput; downstream WiFi TX still needs separate work.
+MT7916, XX230v hardware, dual-radio load and long-duration recovery are not
+validated by this Askey run.
+
 ```sh
 make all-variants GITREV=x
 python3 tests/en7523-core.py build/EN7523_MT7915
@@ -118,9 +200,21 @@ python3 tests/en7523-core.py build/EN7523_MT7915 --split --reverse --quiet --sta
 python3 tests/en7523-core.py build/EN7523_NOWIFI --quiet --staggered
 ```
 
+The direct RX tests execute the linked firmware against modeled RX, QDMA and
+completion rings. They check zero host copies for eligible traffic, sequence
+gaps, old sequence rejection, PN replay rejection, A-MSDU members, fragments,
+key barriers, full TX fallback, source/destination admission and station teardown.
+Both independent-radio probe orders and the highest queue-1 WCID are covered.
+These are firmware execution checks, not evidence of a CPU or throughput gain
+on hardware. Firmware 7.13 has been RAM-booted on the Askey with station association,
+DHCP and GPON traffic. QDMA completions recycle the packet buffers without
+filling the vendor buffer-return FIFO. An earlier 7.12 Askey test exposed
+a host WCID first-member layout regression and exhaustion of the vendor
+buffer-return queue; both were corrected before performance comparison.
+
 The linked-image model delays GDMA completion, checks channel ownership
 and descriptor publication, and verifies that a failed STOP retains its
-in-flight buffers. It also checks PPE initialization, the 512-entry SRAM
+in-flight buffers. It also checks PPE initialization, the 256-entry, 80-byte SRAM
 and 16K DRAM geometry, FoE staging, bounds, ACK timeout and table clear.
 It checks two-band RX, raw byte preservation, fragmented
 frames, descriptor ownership, ring wrapping and STOP, in addition to the
@@ -195,7 +289,9 @@ TX-free rings; the NPU owns data receive rings, which are excluded from the
 WED interrupt mask. Host BA reordering remains enabled for this transport
 when WED is attached.
 
-OpenWrt enables `CONFIG_NET_AIROHA_WHNAT` on EN7523. After host reorder,
+OpenWrt enables `CONFIG_NET_AIROHA_WHNAT` on EN7523 for the vif registry,
+native exception delivery and the CPU-assisted fallback below. Firmware 7.14
+uses the native receive path described above for admitted frames. After host reorder,
 PN validation and mac80211 processing, the WHNAT hook offers eligible IPv4
 frames to LAN QDMA/PPE with a private vif tag. Unbound frames return to the
 original vif below that hook, so they do not loop. The tag is removed before
@@ -396,3 +492,33 @@ checked for FIT hashes, the final kernel/root archive, the corrected
 GDMA channels. Their SHA256 values are recorded in
 `bin/targets/airoha/en7523/clankernpu-7.11-wed-path.sha256` in OpenWrt.
 These images were prepared without restarting either router.
+
+## Periodic UART receive log
+
+The EN7523 MT7915 build enables `print_mask` bit 9 (`0x200`) by default,
+independently of `NPUDBG`. Hart 0 prints a summary every 500 timer ticks
+(configured as five seconds), outside the radio RX and QDMA completion loops.
+No packet-by-packet UART trace is enabled. The host's MIB21 UART-silence gate
+still takes precedence.
+
+`[RX0]` and `[RX1]` show queue enable, direct-mode enable, PPE submissions,
+raw host frames, PN drops and full/unavailable-QDMA fallbacks. Parenthesized
+values are increments since the previous summary. `[QDMA]` shows resource
+readiness, free descriptors (1023 when idle), software tail, hardware DMA index,
+completion head/count, reclaimed buffers, descriptor-writeback polling waits,
+the vendor PPE buffer-return FIFO occupancy, and the last PPE mailbox result.
+The snapshot releases the QDMA ownership mutex before formatting or printing.
+
+Clear bit 9 at `0x1e906844` to silence this summary; preserve other print-mask
+bits when changing it. Other SoCs keep their existing print-mask defaults.
+The kernel flowtable must also be enabled: a growing PPE submission counter
+does not prove forwarding acceleration when every packet returns to the ARM.
+
+## Native PPE receive lifetime (7.14)
+
+`[PPE]` reports consumed return tokens, exceptions, per-band pending buffer
+ownership, invalid tokens and host drops. A bound forwarding workload should
+increase submissions, QDMA completions and PPE returns while exceptions and
+host interrupts stay low. QDMA completion alone is not evidence of forwarding.
+The native path requires the matching mt76 exception decoder and kernel
+`airoha_npu_rx_skb` export in the same image.
