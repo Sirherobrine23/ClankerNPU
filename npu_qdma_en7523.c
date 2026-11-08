@@ -1,7 +1,6 @@
 /* EN7523 native WiFi ingress: QDMA completion and PPE buffer return. */
 #include "npu_internal.h"
 #include "npu_wifi.h"
-#include "npu_wifi_en7523.h"
 
 #if defined(EN7523) && defined(HAS_WIFI)
 #define QDMA_BASE	0x1fb54000
@@ -39,6 +38,26 @@ static u16 return_head[2], return_tail[2];
 static u32 pending[2];
 static u32 ppe_returned, ppe_exceptions, ppe_invalid, ppe_host_drops;
 static u32 ppe_last_data, ppe_last_info;
+u32 ppe_cpu_reasons[32];
+static u32 ppe_logged_reasons[32];
+
+static const char *ppe_reason_name(u32 reason)
+{
+	switch (reason) {
+	case 0x0c:
+		return "TCP_FIN_SYN_RST";
+	case 0x0d:
+		return "UN_HIT";
+	case 0x0e:
+		return "HIT_UNBIND";
+	case 0x0f:
+		return "HIT_UNBIND_RATE_REACH";
+	case 0x15:
+		return "KEEPALIVE_DUP_OLD_HDR";
+	default:
+		return "OTHER";
+	}
+}
 extern u32 en7523_qdma_mutex[2];
 extern u32 en7523_log_tick, en7523_log_stats[2][4];
 extern volatile u32 en7523_qdma_done, en7523_qdma_wb_wait;
@@ -180,7 +199,7 @@ int en7523_qdma_submit(u32 id, u32 addr, u32 len, u32 band,
 static void ppe_return_poll(void)
 {
 	u32 n = REG32(PPE_RETURN_COUNT) & 0xffff;
-	u32 data, metadata, id;
+	u32 data, metadata, id, reason;
 	struct en7523_ppe_packet *p;
 
 	if (n > 64)
@@ -199,10 +218,14 @@ static void ppe_return_poll(void)
 		    !(packets[id].status & PACKET_PPE_DONE)) {
 			p = &packets[id];
 			p->status |= PACKET_PPE_DONE;
-			/* Duplicate old-header keepalives have already been forwarded. */
-			if (!(data >> 16) && ((metadata >> 16) & 31) != 0x15) {
-				p->status |= PACKET_EXCEPTION | (metadata & 0x1fffff);
-				ppe_exceptions++;
+			if (!(data >> 16)) {
+				reason = (metadata >> 16) & 0x1f;
+				ppe_cpu_reasons[reason]++;
+				/* Duplicate old-header keepalives have already been forwarded. */
+				if (reason != 0x15) {
+					p->status |= PACKET_EXCEPTION | (metadata & 0x1fffff);
+					ppe_exceptions++;
+				}
 			}
 			ppe_returned++;
 			packet_complete(id);
@@ -306,7 +329,7 @@ void en7523_ppe_rx_poll(u32 band)
 /* Hart 0 prints outside the RX, completion and interrupt paths. */
 void en7523_wifi_debug_poll(void)
 {
-	u32 now = KITE_TICK, band, i, stats[4];
+	u32 now = KITE_TICK, band, i, stats[4], reasons[32];
 	u32 flags, free = 0, tail = 0, status;
 
 	if (now - en7523_log_tick < 500 || !NDBG_PRINTING(NDBG_RX_LOG) ||
@@ -324,14 +347,16 @@ void en7523_wifi_debug_poll(void)
 		for (i = 0; i < 4; i++)
 			en7523_log_stats[band][i] = stats[i];
 	}
+	flags = irq_save();
+	hw_mutex_lock(qdma_mutex);
 	if (qdma_ready) {
-		flags = irq_save();
-		hw_mutex_lock(qdma_mutex);
 		free = (free_write - free_read) & (EN7523_QDMA_COUNT - 1);
 		tail = tx_tail;
-		hw_mutex_unlock(qdma_mutex);
-		irq_restore(flags);
 	}
+	for (i = 0; i < 32; i++)
+		reasons[i] = ppe_cpu_reasons[i];
+	hw_mutex_unlock(qdma_mutex);
+	irq_restore(flags);
 	status = REG32(QDMA_IRQ_STATUS);
 	npu_printf("[QDMA] ready=%u free=%u tail=%u dma=%u irq=%u/%u done=%u wb_wait=%u ppe_ret=%u mails=%u last=%x\n",
 		   qdma_ready, free, tail, REG32(QDMA_TX_CPU + 4) & 0x3ff,
@@ -342,6 +367,15 @@ void en7523_wifi_debug_poll(void)
 	npu_printf("[PPE] returned=%u exceptions=%u pending=%u/%u invalid=%u host_drop=%u last=%x/%x\n",
 		   ppe_returned, ppe_exceptions, pending[0], pending[1],
 		   ppe_invalid, ppe_host_drops, ppe_last_data, ppe_last_info);
+	for (i = 0; i < 32; i++) {
+		u32 delta = reasons[i] - ppe_logged_reasons[i];
+
+		if (!delta)
+			continue;
+		npu_printf("[PPE REASON] code=%02x name=%s total=%u delta=%u\n",
+			   i, ppe_reason_name(i), reasons[i], delta);
+		ppe_logged_reasons[i] = reasons[i];
+	}
 }
 
 void en7523_qdma_loop(void)

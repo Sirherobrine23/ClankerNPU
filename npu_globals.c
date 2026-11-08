@@ -107,19 +107,7 @@ wifi_mail_fn_t get_wait_func_table[WLAN_FUNC_GET_WAIT_MAX]
 
 wifi_mail_fn_t set_wait_func_table[WLAN_FUNC_SET_WAIT_MAX]
 	__attribute__((section(".data"))) = {
-#if defined(EN7523) && defined(HAS_WIFI)
-	[WLAN_FUNC_SET_WAIT_PCIE_ADDR] = en7523_wifi_set,
-	[WLAN_FUNC_SET_WAIT_DESC] = en7523_wifi_set,
-	[WLAN_FUNC_SET_WAIT_NPU_INIT_DONE] = en7523_wifi_set,
-	[WLAN_FUNC_SET_WAIT_DRIVER_MODEL] = en7523_wifi_set,
-	[WLAN_FUNC_SET_WAIT_PKT_BUF_ADDR] = en7523_wifi_set,
-	[WLAN_FUNC_SET_WAIT_IS_FORCE_TO_CPU] = en7523_wifi_set,
-	[WLAN_FUNC_SET_WAIT_PCIE_PORT_TYPE] = en7523_wifi_set,
-	[WLAN_FUNC_SET_WAIT_HWNAT_INIT] = en7523_rx_control,
-	[WLAN_FUNC_SET_WAIT_BA_WIN_SIZE] = en7523_rx_control,
-	[WLAN_FUNC_SET_WAIT_EN7523_STA] = en7523_rx_control,
-	[WLAN_FUNC_SET_WAIT_EN7523_KEY] = en7523_rx_control,
-#elif defined(WIFI_KITE)
+#if defined(WIFI_KITE)
 	[WLAN_FUNC_SET_WAIT_PCIE_ADDR] = wifi_mail_set_pcie_addr,
 	[WLAN_FUNC_SET_WAIT_DESC] = wifi_mail_set_desc,
 	[WLAN_FUNC_SET_WAIT_NPU_INIT_DONE] = wifi_mail_set_init_done,
@@ -151,6 +139,11 @@ wifi_mail_fn_t set_wait_func_table[WLAN_FUNC_SET_WAIT_MAX]
 	[WLAN_FUNC_SET_WAIT_INODE_PCIE_SWAP] = wifi_mail_set_pcie_swap,
 	[WLAN_FUNC_SET_WAIT_RATELIMIT_CTRL] = wifi_mail_set_ratelimit,
 	[WLAN_FUNC_SET_WAIT_ARHT_CHIP_INFO] = wifi_mail_set_arht_chip_info,
+#ifdef EN7523
+	[WLAN_FUNC_SET_WAIT_HWNAT_INIT] = en7523_rx_control,
+	[WLAN_FUNC_SET_WAIT_EN7523_STA] = en7523_rx_control,
+	[WLAN_FUNC_SET_WAIT_EN7523_KEY] = en7523_rx_control,
+#endif
 #elif defined(WIFI_EAGLE)
 	[WLAN_FUNC_SET_WAIT_PCIE_ADDR] = eagle_mail_set_pcie_addr,
 	[WLAN_FUNC_SET_WAIT_DESC] = eagle_mail_set_desc,

@@ -19,13 +19,17 @@ load(mask_addr, mask.to_bytes(4, 'little'))
 for _ in range(150000):
     tick(1)
     report = bytes(uart[before:])
-    if b'[QDMA]' in report and b'last=' in report and b'host_drop=' in report and report.endswith(b'\n\r'):
+    if (b'[QDMA]' in report and b'last=' in report and
+        b'host_drop=' in report and b'[PPE REASON] code=15' in report and
+        report.endswith(b'\n\r')):
         break
 else:
     raise AssertionError('periodic RX/QDMA UART report did not finish')
 report = bytes(uart[before:])
 assert report.count(b'[RX0]') == report.count(b'[RX1]') == report.count(b'[QDMA]') == 1
 assert b'ppe_ret=' in report and b'wb_wait=' in report and b'full=' in report
+assert b'[PPE REASON] code=0f' in report
+assert b'[PPE REASON] code=15' in report
 before = len(uart)
 tick(5000)
 assert len(uart) == before, 'summary spammed within its reporting period'

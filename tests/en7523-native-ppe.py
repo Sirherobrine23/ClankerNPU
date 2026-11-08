@@ -50,9 +50,11 @@ def submit_native(sn):
 head = read(0x1ec0d188)
 index, ident, ethernet = submit_native(200)
 metadata = 0xf << 16 | 0x4010
+before_rate = read(symbol('ppe_cpu_reasons') + 0xf * 4)
 ppe_returns.append((ident, metadata))
 wait_until(lambda: not ppe_returns, 'PPE FIFO was not acknowledged')
 assert packet_status(ident) & 0x20000000
+assert read(symbol('ppe_cpu_reasons') + 0xf * 4) == before_rate + 1
 assert read(0x1ec0d188) == head and packet_status(ident) & 0x80000000
 # An outstanding host copy must retain the buffer and descriptor ownership.
 dma_hold.add(0)
@@ -79,9 +81,11 @@ assert read(0x1ec0d188) == head, 'bound forwarding generated a host IRQ'
 
 # A duplicate keepalive is not injected into the host as fresh traffic.
 index, ident, _ = submit_native(202)
+before_keepalive = read(symbol('ppe_cpu_reasons') + 0x15 * 4)
 ppe_returns.append((ident, 0x15 << 16 | 0x4011))
 tx_complete(index)
 wait_until(lambda: not packet_status(ident), 'keepalive buffer leaked')
+assert read(symbol('ppe_cpu_reasons') + 0x15 * 4) == before_keepalive + 1
 assert read(0x1ec0d188) == head
 
 # Backpressure cannot overwrite a host-owned descriptor or leak a PPE buffer.

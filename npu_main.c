@@ -374,21 +374,23 @@ void core_dispatch(int a0, int a1)
 	u32 core = get_hartid();
 #endif
 
-	npu_printf("core %d: dispatching\n", core);
-
 #ifdef EN7523
 #ifdef HAS_WIFI
 	switch (core) {
 	case 0:
+		npu_printf("en7523_wifi_init\n");
 		en7523_wifi_init();
 		break;
 	case 1:
+		npu_printf("en7523_wifi_rx_loop\n");
 		en7523_wifi_rx_loop(0);
 		break;
 	case 2:
+		npu_printf("en7523_wifi_rx_loop\n");
 		en7523_wifi_rx_loop(1);
 		break;
 	case 3:
+		npu_printf("en7523_qdma_loop\n");
 		en7523_qdma_loop();
 		break;
 	}

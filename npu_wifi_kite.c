@@ -1,8 +1,8 @@
 /*
  * AN75XX NPU firmware - kite mailbox handlers
  *
- * MT7916 and MT7996. One handler per funcId, indexed by the tables in
- * npu_globals.c. interfaceID in the message header is a band here.
+ * MT7915, MT7916 and MT7996. One handler per funcId, indexed by the
+ * tables in npu_globals.c. interfaceID in the message header is a band.
  */
 
 #include "npu_internal.h"
@@ -14,6 +14,302 @@
  * npu_set_pcie_base. See npu_wifi_eagle.c. */
 
 #ifdef WIFI_KITE
+
+#ifdef EN7523
+#define EN7523_RX_DESCS	1536
+#define EN7523_RX_BYTES	3500
+#define EN7523_RX_DONE	0x80000000
+#define EN7523_RX_LAST	0x40000000
+#define EN7523_RX_BATCH	32
+
+extern volatile u32 en7523_wifi_ready;
+extern volatile u32 en7523_wifi_enabled[2];
+extern volatile u32 en7523_wifi_busy[2];
+extern u32 en7523_wifi_prepared[2];
+extern u32 en7523_wifi_regs[2];
+extern u32 en7523_wifi_ring[2];
+extern u32 en7523_wifi_index[2];
+extern u32 en7523_wifi_port[2];
+extern u32 en7523_wifi_total[2];
+extern u32 en7523_wifi_part[2];
+extern u32 en7523_wifi_drop[2];
+extern volatile u32 en7523_wifi_paused[2];
+extern volatile u32 en7523_wifi_direct[2];
+extern u32 en7523_wifi_stats[2][4];
+static u32 en7523_chain_first[2];
+static u32 en7523_chain_last[2];
+static u32 en7523_chain_bytes[2];
+
+static void en7523_wifi_fence(void)
+{
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+}
+
+void en7523_wifi_init(void)
+{
+	u32 base;
+
+	sram_buf_init();
+	buf_mgr_init();
+	base = sram_buf_alloc(1);
+	if (!base)
+		return;
+	en7523_wifi_ring[0] = base + 0x6020;
+	en7523_wifi_ring[1] = base;
+	en7523_chain_first[0] = 0xffff;
+	en7523_chain_first[1] = 0xffff;
+	en7523_rx_state_init();
+	en7523_wifi_fence();
+	en7523_wifi_ready = 1;
+}
+
+static int en7523_wifi_prepare(u32 band, u32 count)
+{
+	volatile u32 *desc = (volatile u32 *)en7523_wifi_ring[band];
+	u32 i, window;
+	s32 id;
+
+	if (count != EN7523_RX_DESCS || !wifi_pkt_buf_addr ||
+	    !en7523_wifi_regs[band] || en7523_wifi_enabled[band])
+		return NPU_MBOX_EINVAL;
+	if (en7523_wifi_prepared[band])
+		return NPU_MBOX_SUCCESS;
+
+	/* The SDK's P1 window is at SCU +0x38, P0 at +0x30. */
+	window = en7523_wifi_port[band] ? PCIE0_WIN_BASE : PCIE1_WIN_BASE;
+	REG32(window) = en7523_wifi_ring[1];
+	REG32(window + 4) = en7523_wifi_ring[0] + EN7523_RX_DESCS * 16;
+	for (i = 0; i < count; i++, desc += 4) {
+		id = buf_mgr_alloc();
+		if (id < 0)
+			return NPU_MBOX_ERROR;
+		desc[0] = wifi_pkt_buf_addr + ((u32)id << 12);
+		desc[1] = EN7523_RX_BYTES << 16;
+		desc[2] = 0;
+		desc[3] = 0;
+	}
+	en7523_wifi_fence();
+	en7523_wifi_prepared[band] = 1;
+	return NPU_MBOX_SUCCESS;
+}
+
+static int en7523_wifi_run(u32 band, u32 enable)
+{
+	u32 i, base;
+
+	if (enable > 1)
+		return NPU_MBOX_EINVAL;
+	if (!enable) {
+		en7523_wifi_enabled[band] = 0;
+		en7523_wifi_fence();
+		for (i = 0; i < 100; i++) {
+			if (!en7523_wifi_busy[band] &&
+			    !en7523_ppe_pending(band)) {
+				en7523_wifi_fence();
+				ba_flush_all(band);
+				en7523_rx_poll(band);
+				hostadpt_rx_flush(band);
+				en7523_rx_free(en7523_chain_first[band]);
+				en7523_chain_first[band] = 0xffff;
+				return NPU_MBOX_SUCCESS;
+			}
+			delay_ms_mcycle(1);
+		}
+		return NPU_MBOX_ERROR;
+	}
+	if (!en7523_wifi_prepared[band])
+		return NPU_MBOX_ENODEV;
+	base = REG32(HOSTADPT_RX_BASE_PTR(band));
+	if ((base & 3) || base < 0x80000000 || base > 0xbfffd000 ||
+	    REG32(HOSTADPT_RX_MAX_CNT(band)) != 512)
+		return NPU_MBOX_EINVAL;
+	if (en7523_wifi_enabled[band])
+		return NPU_MBOX_SUCCESS;
+	hostadpt_rx_init(band);
+	en7523_wifi_total[band] = 0;
+	en7523_wifi_part[band] = 0;
+	en7523_wifi_drop[band] = 0;
+	en7523_wifi_fence();
+	en7523_wifi_enabled[band] = 1;
+	return NPU_MBOX_SUCCESS;
+}
+
+int en7523_wifi_set(u32 *msg)
+{
+	u32 band = msg[0] & 15;
+	u32 val = msg[2];
+
+	npu_printf("en7523_wifi_set: band=%u funcId=%u val=%u\n",
+		   band, msg[1], val);
+	if (band > 1)
+		return NPU_MBOX_EINVAL;
+	if (!en7523_wifi_ready)
+		return NPU_MBOX_ENODEV;
+	switch (msg[1]) {
+	case WLAN_FUNC_SET_WAIT_NPU_INIT_DONE:
+		return en7523_wifi_run(band, val);
+	case WLAN_FUNC_SET_WAIT_PCIE_ADDR:
+		if (!val || (val & 3) || val >= 0x80000000 ||
+		    en7523_wifi_prepared[band])
+			return NPU_MBOX_EINVAL;
+		en7523_wifi_regs[band] = val;
+		npu_set_pcie_base(val, band);
+		break;
+	case WLAN_FUNC_SET_WAIT_DESC:
+		return en7523_wifi_prepare(band, val);
+	case WLAN_FUNC_SET_WAIT_DRIVER_MODEL:
+		if (val > 1)
+			return NPU_MBOX_EOPNOTSUPP;
+		npu_set_driver_model(val);
+		break;
+	case WLAN_FUNC_SET_WAIT_PKT_BUF_ADDR:
+		if (val < 0x80000000 ||
+		    val > 0xc0000000 - (5600u << 12) || (val & 0xfff))
+			return NPU_MBOX_EINVAL;
+		/* Both PCIe consumers share one pool without resetting its IDs. */
+		if (val != wifi_pkt_buf_addr &&
+		    (en7523_wifi_prepared[0] || en7523_wifi_prepared[1]))
+			return NPU_MBOX_EINVAL;
+		npu_set_pkt_buf_addr(val);
+		break;
+	case WLAN_FUNC_SET_WAIT_PCIE_PORT_TYPE:
+		if (val > 1 || en7523_wifi_prepared[band])
+			return NPU_MBOX_EINVAL;
+		en7523_wifi_port[band] = val;
+		npu_set_pcie_port_type(val);
+		break;
+	case WLAN_FUNC_SET_WAIT_IS_FORCE_TO_CPU:
+		if (val > 1)
+			return NPU_MBOX_EINVAL;
+		en7523_wifi_direct[band] = !val;
+		npu_set_force_to_cpu(val);
+		break;
+	default:
+		return NPU_MBOX_EOPNOTSUPP;
+	}
+	return NPU_MBOX_SUCCESS;
+}
+
+int en7523_wifi_get(u32 *msg)
+{
+	u32 band = msg[0] & 15;
+
+	if (band > 1)
+		return NPU_MBOX_EINVAL;
+	if (!en7523_wifi_ready)
+		return NPU_MBOX_ENODEV;
+	if (msg[1] == WLAN_FUNC_GET_WAIT_DBG_COUNTER) {
+		u32 i;
+
+		for (i = 0; i < 4; i++)
+			msg[2 + i] = en7523_wifi_stats[band][i];
+	} else {
+		msg[2] = msg[1] == WLAN_FUNC_GET_WAIT_RXDESC_BASE ?
+			 en7523_wifi_ring[band] : 0;
+	}
+	return NPU_MBOX_SUCCESS;
+}
+
+static int en7523_wifi_rx(u32 band)
+{
+	u32 idx = en7523_wifi_index[band];
+	volatile u32 *desc =
+		(volatile u32 *)(en7523_wifi_ring[band] + idx * 16);
+	u32 ctrl = desc[1], buf, len, id, total;
+	s32 replacement;
+
+	if (!(ctrl & EN7523_RX_DONE))
+		return 0;
+	en7523_wifi_fence();
+	buf = desc[0];
+	len = (ctrl >> 16) & 0x3fff;
+	id = (buf - wifi_pkt_buf_addr) >> 12;
+	if (!en7523_wifi_part[band]) {
+		en7523_wifi_drop[band] = 0;
+		en7523_chain_bytes[band] = 0;
+		en7523_wifi_total[band] =
+			ctrl & EN7523_RX_LAST ? len : REG32(buf) & 0xffff;
+	}
+	total = en7523_wifi_total[band];
+	replacement = buf_mgr_alloc();
+	if (!len || len > EN7523_RX_BYTES || !total || total > 16383 ||
+	    id >= 5600 || replacement < 0 || en7523_wifi_part[band] >= 7 ||
+	    en7523_wifi_drop[band]) {
+		if (replacement >= 0)
+			buf_mgr_free(replacement);
+		en7523_rx_free(en7523_chain_first[band]);
+		en7523_chain_first[band] = 0xffff;
+		en7523_wifi_drop[band] = 1;
+	} else {
+		en7523_rx_link(id, len, 0xffff);
+		if (en7523_chain_first[band] == 0xffff)
+			en7523_chain_first[band] = id;
+		else
+			en7523_rx_link(en7523_chain_last[band],
+					en7523_chain_bytes[band] & 0xffff, id);
+		en7523_chain_last[band] = id;
+		en7523_chain_bytes[band] = len;
+		desc[0] = wifi_pkt_buf_addr + ((u32)replacement << 12);
+		if (ctrl & EN7523_RX_LAST) {
+			en7523_rx_process(en7523_chain_first[band], total, band);
+			en7523_chain_first[band] = 0xffff;
+		}
+	}
+	desc[1] = EN7523_RX_BYTES << 16;
+	en7523_wifi_fence();
+	REG32(en7523_wifi_regs[band] + 8) = idx;
+	en7523_wifi_index[band] =
+		idx + 1 == EN7523_RX_DESCS ? 0 : idx + 1;
+	en7523_wifi_part[band] = ctrl & EN7523_RX_LAST ? 0 :
+		(en7523_wifi_part[band] < 8 ? en7523_wifi_part[band] + 1 : 8);
+	if (ctrl & EN7523_RX_LAST)
+		en7523_wifi_drop[band] = 0;
+	return 1;
+}
+
+void en7523_wifi_discard(u32 band)
+{
+	u32 n, idx = en7523_wifi_index[band];
+	volatile u32 *desc;
+
+	en7523_rx_free(en7523_chain_first[band]);
+	en7523_chain_first[band] = 0xffff;
+	en7523_wifi_part[band] = 0;
+	for (n = 0; n < EN7523_RX_DESCS; n++) {
+		desc = (volatile u32 *)(en7523_wifi_ring[band] + idx * 16);
+		if (!(desc[1] & EN7523_RX_DONE))
+			break;
+		desc[1] = EN7523_RX_BYTES << 16;
+		en7523_wifi_fence();
+		REG32(en7523_wifi_regs[band] + 8) = idx;
+		idx = idx + 1 == EN7523_RX_DESCS ? 0 : idx + 1;
+	}
+	en7523_wifi_index[band] = idx;
+}
+
+void en7523_wifi_rx_loop(u32 band)
+{
+	u32 i;
+
+	npu_dbg_loop(NDBG_TAG('W', 'R', 'X', '0') + band);
+	while (1) {
+		npu_dbg_poll();
+		en7523_wifi_busy[band] = 1;
+		en7523_wifi_fence();
+		en7523_ppe_rx_poll(band);
+		if (en7523_wifi_enabled[band] &&
+		    !en7523_wifi_paused[band]) {
+			for (i = 0; i < EN7523_RX_BATCH; i++)
+				if (!en7523_wifi_rx(band))
+					break;
+			en7523_rx_poll(band);
+			hostadpt_rx_flush(band);
+		}
+		en7523_wifi_fence();
+		en7523_wifi_busy[band] = 0;
+	}
+}
+#endif /* EN7523 */
 
 static void npu_mbox_txrx_ring_size_get(u32 dir, u32 band, u32 *size)
 {
@@ -220,24 +516,36 @@ int wifi_mail_set_pcie_swap(u32 *msg)
 
 int wifi_mail_set_pcie_addr(u32 *msg)
 {
+#ifdef EN7523
+	return en7523_wifi_set(msg);
+#else
 	npu_set_pcie_base(msg[2], msg[0] & 0xF);
 	return 1;
+#endif
 }
 
 /* the band's npu_init, then its rx ring */
 int wifi_mail_set_desc(u32 *msg)
 {
+#ifdef EN7523
+	return en7523_wifi_set(msg);
+#else
 	u32 band = msg[0] & 0xF;
 
 	wifi_npu_init(band);
 	npu_set_rxd_init(msg[2], band);
 	return 1;
+#endif
 }
 
 int wifi_mail_set_init_done(u32 *msg)
 {
+#ifdef EN7523
+	return en7523_wifi_set(msg);
+#else
 	(void)msg;
 	return 1;
+#endif
 }
 
 int wifi_mail_set_tran_to_cpu(u32 *msg)
@@ -250,14 +558,22 @@ int wifi_mail_set_tran_to_cpu(u32 *msg)
 
 int wifi_mail_set_ba_win_size(u32 *msg)
 {
+#ifdef EN7523
+	return en7523_rx_control(msg);
+#else
 	npu_set_ba_entry(msg[0] & 0xF, msg[2]);
 	return 1;
+#endif
 }
 
 int wifi_mail_set_driver_model_cmd(u32 *msg)
 {
+#ifdef EN7523
+	return en7523_wifi_set(msg);
+#else
 	npu_set_driver_model((u8)msg[2]);
 	return 1;
+#endif
 }
 
 int wifi_mail_set_del_sta(u32 *msg)
@@ -274,8 +590,12 @@ int wifi_mail_set_dram_ba_node(u32 *msg)
 
 int wifi_mail_set_pkt_buf(u32 *msg)
 {
+#ifdef EN7523
+	return en7523_wifi_set(msg);
+#else
 	npu_set_pkt_buf_addr(msg[2]);
 	return 1;
+#endif
 }
 
 int wifi_mail_set_test_noba(u32 *msg)
@@ -298,8 +618,12 @@ int wifi_mail_set_flushall(u32 *msg)
 
 int wifi_mail_set_force_cpu(u32 *msg)
 {
+#ifdef EN7523
+	return en7523_wifi_set(msg);
+#else
 	npu_set_force_to_cpu((u8)msg[2]);
 	return 1;
+#endif
 }
 
 int wifi_mail_set_pcie_state(u32 *msg)
@@ -310,8 +634,12 @@ int wifi_mail_set_pcie_state(u32 *msg)
 
 int wifi_mail_set_port_type(u32 *msg)
 {
+#ifdef EN7523
+	return en7523_wifi_set(msg);
+#else
 	npu_set_pcie_port_type((u8)msg[2]);
 	return 1;
+#endif
 }
 
 int wifi_mail_set_retry(u32 *msg)
@@ -436,6 +764,9 @@ int wifi_mail_get_ring_size(u32 *msg)
 
 int wifi_mail_get_rxdesc_base(u32 *msg)
 {
+#ifdef EN7523
+	return en7523_wifi_get(msg);
+#else
 	u32 band = msg[0] & 0xF;
 	u32 base;
 
@@ -447,15 +778,20 @@ int wifi_mail_get_rxdesc_base(u32 *msg)
 		msg[2] = 1111;
 	}
 	return 1;
+#endif
 }
 
 /* GET_WAIT handlers receive the DMA-translated message pointer. */
 
 int wifi_mail_get_npu_info(u32 *msg)
 {
+#ifdef EN7523
+	return en7523_wifi_get(msg);
+#else
 	msg[2] = 0;
 	npu_mbox_get_npu_info();
 	return 1;
+#endif
 }
 
 int wifi_mail_get_last_rate(u32 *msg)
@@ -509,8 +845,12 @@ int wifi_mail_get_counter(u32 *msg)
 
 int wifi_mail_get_dbg_counter(u32 *msg)
 {
+#ifdef EN7523
+	return en7523_wifi_get(msg);
+#else
 	msg[2] = counter_base_get(msg[0] & 0xF);
 	return 1;
+#endif
 }
 
 int wifi_mail_get_wcid_dbg_counter(u32 *msg)

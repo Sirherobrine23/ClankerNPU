@@ -40,10 +40,8 @@ enum airoha_npu_wlan_set_cmd {
 #ifdef EN7523
 	WLAN_FUNC_SET_WAIT_EN7523_STA = 34,
 	WLAN_FUNC_SET_WAIT_EN7523_KEY = 35,
-	WLAN_FUNC_SET_WAIT_MAX = 36,
-#else
-	WLAN_FUNC_SET_WAIT_MAX = 34,
 #endif
+	WLAN_FUNC_SET_WAIT_MAX,
 };
 
 enum airoha_npu_wlan_get_cmd {

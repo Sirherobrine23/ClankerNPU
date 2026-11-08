@@ -60,8 +60,10 @@ static int wifi_mail_call(wifi_mail_fn_t fn, u32 *msg, const char *op)
 {
 	int ret;
 
-	if (!fn)
+	if (!fn) {
+		npu_printf("wifi_mail_%s_operation not support !. funcId=%u\n", op, msg[1]);
 		return NPU_MBOX_EOPNOTSUPP;
+	}
 	ret = fn(msg);
 	if (!(u16)ret)
 		npu_printf("wifi_mail_%s_operation fail !\n", op);

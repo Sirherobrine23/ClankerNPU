@@ -266,7 +266,7 @@ int boot_printf(const char *fmt, ...);
 void uart_rx_isr(int src);
 void boot_uart_init(void);
 
-/* npu_wifi_en7523.c */
+/* EN7523 WiFi backend */
 #if defined(EN7523) && defined(HAS_WIFI)
 void en7523_qdma_loop(void);
 int en7523_rx_control(u32 *msg);
