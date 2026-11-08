@@ -1,0 +1,14 @@
+{'name': 'askey_rtf8225vw', 'line_count': 19468, 'pseudo_entries': 255, 'pointer_entries': 27, 'mmio_access_sites': 24}
+{'name': 'en7523_7592_7615', 'line_count': 15293, 'pseudo_entries': 167, 'pointer_entries': 21, 'mmio_access_sites': 15}
+{'name': 'en7523_7915', 'line_count': 19833, 'pseudo_entries': 274, 'pointer_entries': 30, 'mmio_access_sites': 24}
+{'name': 'en7523_7916', 'line_count': 19514, 'pseudo_entries': 269, 'pointer_entries': 32, 'mmio_access_sites': 24}
+{'name': 'en7523_ex530v', 'line_count': 20123, 'pseudo_entries': 270, 'pointer_entries': 31, 'mmio_access_sites': 24}
+{'name': 'en7523_heimgard_cx30', 'line_count': 22952, 'pseudo_entries': 310, 'pointer_entries': 31, 'mmio_access_sites': 24}
+{'name': 'old_askey_rtf8225vw', 'line_count': 19569, 'pseudo_entries': 259, 'pointer_entries': 26, 'mmio_access_sites': 24}
+{'name': 'an7552_mt7916', 'line_count': 30327, 'pseudo_entries': 362, 'pointer_entries': 45, 'mmio_access_sites': 28}
+{'name': 'an7552_mt7991', 'line_count': 29958, 'pseudo_entries': 335, 'pointer_entries': 48, 'mmio_access_sites': 27}
+{'name': 'an7581_mt7916', 'line_count': 32963, 'pseudo_entries': 446, 'pointer_entries': 54, 'mmio_access_sites': 24}
+{'name': 'an7581_mt7992', 'line_count': 36146, 'pseudo_entries': 467, 'pointer_entries': 51, 'mmio_access_sites': 24}
+{'name': 'an7581_mt7996', 'line_count': 37096, 'pseudo_entries': 499, 'pointer_entries': 52, 'mmio_access_sites': 24}
+{'name': 'an7583_mt7916', 'line_count': 30790, 'pseudo_entries': 381, 'pointer_entries': 54, 'mmio_access_sites': 23}
+{'name': 'an7583_mt7992', 'line_count': 32437, 'pseudo_entries': 364, 'pointer_entries': 48, 'mmio_access_sites': 23}

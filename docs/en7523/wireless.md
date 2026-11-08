@@ -522,3 +522,13 @@ increase submissions, QDMA completions and PPE returns while exceptions and
 host interrupts stay low. QDMA completion alone is not evidence of forwarding.
 The native path requires the matching mt76 exception decoder and kernel
 `airoha_npu_rx_skb` export in the same image.
+
+The `[PPE REASON]` lines show the PPE CPU reason extracted from bits 20:16
+of the return `INFO` word, counted only when the upper half of `DATA` is
+zero and the returned packet ID is valid. Each reason reports a cumulative
+total and the delta since the previous five-second report. Only reasons
+whose counters changed are printed. `0x0c` is TCP FIN/SYN/RST, `0x0d`
+is UN_HIT, `0x0e` is HIT_UNBIND, and `0x0f` is
+HIT_UNBIND_RATE_REACH. The `0x15` keepalive reason is counted but is
+not treated as an exception. Other reason codes retain their numeric ID;
+the log does not interpret `INFO` for successfully forwarded packets.
