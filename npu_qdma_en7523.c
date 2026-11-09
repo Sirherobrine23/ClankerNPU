@@ -209,7 +209,7 @@ static void ppe_return_poll(void)
 		if (data & 0x80000000u)
 			break;
 		/* INFO belongs to the current FIFO head; ACK advances both words. */
-		metadata = REG32(PPE_RETURN_INFO);
+		metadata = (data & (1 << 16)) ? 0 : REG32(PPE_RETURN_INFO);
 		ppe_last_data = data;
 		ppe_last_info = metadata;
 		id = data & 0xffff;
@@ -218,7 +218,7 @@ static void ppe_return_poll(void)
 		    !(packets[id].status & PACKET_PPE_DONE)) {
 			p = &packets[id];
 			p->status |= PACKET_PPE_DONE;
-			if (!(data >> 16)) {
+			if (!(data & (1 << 16))) {
 				reason = (metadata >> 16) & 0x1f;
 				ppe_cpu_reasons[reason]++;
 				/* Duplicate old-header keepalives have already been forwarded. */

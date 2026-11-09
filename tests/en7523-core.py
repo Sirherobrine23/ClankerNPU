@@ -308,7 +308,7 @@ if quiet:
     assert not console, 'MIB21 must suppress SoC UART output'
 else:
     assert re.search(r'core freq at [1-9][0-9]* MHz', console)
-    assert ('NPU Version: ClankerNOPU v7.' + ('14.0.0_MT7915_' if wifi else '13.0.0_NOWIFI_')) in console
+    assert ('NPU Version: ClankerNOPU v7.' + ('14.1.0_MT7915_' if wifi else '13.0.0_NOWIFI_')) in console
     assert 'cores enabled 15, running 15' in console
     assert 'Error:' not in console
     for hart in range(4):
@@ -341,7 +341,7 @@ for ptr in (0x85012000, 0x8a004000):
     assert read(ptr+12)==0x12345678, 'response exceeded SDK payload'
     for ifindex in (0, 3, 15):
         control,version=request(cmd=10, ptr=ptr, ifindex=ifindex)
-        assert control&0x1e==6 and version==(0x070e0000 if wifi else 0x070d0000)
+        assert control&0x1e==6 and version==(0x070e0100 if wifi else 0x070d0000)
         assert read(ptr)==0x30|ifindex and read(ptr+4)==10
         assert read(ptr+12)==0x12345678, 'version exceeded its response word'
 # Wire values must match the host enum, not Linux's negative errno numbers.
@@ -398,7 +398,7 @@ for kwargs, expected in (({},1), (dict(cmd=10),1), (dict(ptr=0),EINVAL),
     before=read(0x1ec0c0b8)
     _,info=request(arg=0,**kwargs)
     if kwargs.get('cmd')==10:
-        assert info==(0x070e0000 if wifi else 0x070d0000)
+        assert info==(0x070e0100 if wifi else 0x070d0000)
     assert read(0x1ec0c0b0)==0
     assert read(0x1ec0c0b4)==expected
     assert read(0x1ec0c0b8)==before+1 and not mutex_owner

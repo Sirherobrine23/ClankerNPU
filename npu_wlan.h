@@ -1,24 +1,6 @@
 #ifndef NPU_WLAN_H
 #define NPU_WLAN_H
 
-enum airoha_npu_wlan_chip {
-	AIROHA_NPU_WLAN_NONE,
-	AIROHA_NPU_WLAN_MT7915A,
-	AIROHA_NPU_WLAN_MT7915D,
-	AIROHA_NPU_WLAN_MT7916,
-	AIROHA_NPU_WLAN_MT7990,
-	AIROHA_NPU_WLAN_MT7992,
-	AIROHA_NPU_WLAN_MT7996,
-
-	AIROHA_NPU_WLAN_MAX
-};
-
-enum airoha_npu_bands {
-	AIROHA_WLAN_BAND_2G = 0,
-	AIROHA_WLAN_BAND_5G = 1,
-	AIROHA_WLAN_BAND_6G = 2,
-};
-
 /* Wire IDs match Linux include/linux/soc/airoha/airoha_offload.h. */
 enum airoha_npu_wlan_set_cmd {
 	WLAN_FUNC_SET_WAIT_PCIE_ADDR = 0,

@@ -299,23 +299,42 @@
 #define MAX_CORE_NUM            8
 #endif
 
+enum airoha_npu_wlan_chip {
+	AIROHA_NPU_WLAN_NONE = 0,
+	AIROHA_NPU_WLAN_MT7915A,
+	AIROHA_NPU_WLAN_MT7915D,
+	AIROHA_NPU_WLAN_MT7916,
+	AIROHA_NPU_WLAN_MT7990,
+	AIROHA_NPU_WLAN_MT7992,
+	AIROHA_NPU_WLAN_MT7996,
+
+	AIROHA_NPU_WLAN_MAX
+};
+
+enum airoha_npu_bands {
+	AIROHA_WLAN_BAND_2G = 0,
+	AIROHA_WLAN_BAND_5G,
+	AIROHA_WLAN_BAND_6G,
+};
+
 /* Mailbox function IDs */
-#define MFUNC_WIFI              0
-#define MFUNC_TUNNEL            1
-#define MFUNC_NOTIFY            2
-#define MFUNC_DBA               3
-#define MFUNC_TR471             4
-#define MFUNC_HWNAT             5
-#define MAX_MBOX_FUNC           8
+enum mailbox_callbacks {
+	NPU_FUNC_WIFI = 0,
+	NPU_FUNC_TUNNEL,
+	NPU_FUNC_NOTIFY,
+	NPU_FUNC_DBA,
+	NPU_FUNC_TR471,
+	NPU_FUNC_PPE,
 
-/* WiFi interfaces */
-#define INTERFACE_2G            0
-#define INTERFACE_5G            1
+	MAX_FUNC_MBOX = 8
+};
 
-/* WiFi driver models */
-#define DRIVER_MODEL_MT7915A    0
-#define DRIVER_MODEL_MT7915D    1
-#define DRIVER_MODEL_MT7916D    2
+enum func_type {
+	NPU_OP_SET = 1,
+	NPU_OP_SET_NO_WAIT,
+	NPU_OP_GET,
+	NPU_OP_GET_NO_WAIT,
+};
 
 /* Init complete sentinel */
 #define INIT_COMPLETE           0xCCCCCCCC

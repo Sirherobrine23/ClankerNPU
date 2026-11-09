@@ -1,22 +1,18 @@
-/* EN7523 MT7915 RX admission, replay protection and PPE handoff. */
+/* EN7523 MT7915 open-network RX reordering and PPE handoff. */
 #include "npu_internal.h"
 #include "npu_wifi.h"
 
 #if defined(EN7523) && defined(HAS_WIFI)
 struct en7523_sta {
-	u8 enabled, cipher, key, vif;
+	u8 enabled;
 	u16 generation;
-	u8 addr[6], router[6];
-	u8 amsdu[8];
-	u16 sn[8];
-	u8 pn[16][6];
 };
 
 struct en7523_frame {
 	struct kite_node node;
 	u16 fc;
-	u8 translated, sec, key, fragment, bad;
-	u8 pn[6];
+	u8 translated, sec, fragment, bad;
+	u8 ta[6];
 };
 
 _Static_assert(sizeof(struct en7523_sta) * 2 * (EN7523_STA_MAX + 1) <= 0xc000,
@@ -60,7 +56,7 @@ static u32 rx_word(u32 addr)
 
 static int rx_decode(u32 id, u32 len, struct en7523_frame *f)
 {
-	u32 buf = wifi_pkt_buf_addr + (id << 12), off = 24, pn = 0;
+	u32 buf = wifi_pkt_buf_addr + (id << 12), off = 24;
 	u32 w0, w1, w2, w3, w4, i, seq = 0, fc = 0;
 
 	if (id >= 5600 || len < 24 || len > 16383)
@@ -85,18 +81,18 @@ static int rx_decode(u32 id, u32 len, struct en7523_frame *f)
 	f->translated = !!(w2 & 0x2000);
 	f->fragment = !!(w2 & 0x08000000);
 	f->sec = (w1 >> 16) & 31;
-	f->key = (w1 >> 21) & 3;
 	if (w1 & 0x4000) {
 		if (off + 16 > len)
 			return -1;
 		fc = rx_word(buf + off) & 0xffff;
 		seq = rx_word(buf + off + 8) & 0xffff;
+		for (i = 0; i < 6; i++)
+			f->ta[i] = *(u8 *)(buf + off + 2 + i);
 		off += 16;
 	} else if (f->translated) {
 		return -1;
 	}
 	if (w1 & 0x800) {
-		pn = off;
 		off += 16;
 	}
 	if (w1 & 0x1000)
@@ -128,14 +124,6 @@ static int rx_decode(u32 id, u32 len, struct en7523_frame *f)
 	f->node.sn = seq >> 4;
 	f->fragment |= !!(seq & 15);
 	f->node.hdr = off;
-	if (f->sec) {
-		if (f->sec != 4 || !pn || (w1 & 0x01800000)) {
-			f->bad = 1;
-			return 0;
-		}
-		for (i = 0; i < 6; i++)
-			f->pn[i] = *(u8 *)(buf + pn + 5 - i);
-	}
 	return 0;
 }
 
@@ -171,9 +159,10 @@ int en7523_rx_managed(u32 id, u32 len, u32 band)
 	    (f.fc & 0x0c) != 8)
 		return 0;
 	sta = &stations[band * (EN7523_STA_MAX + 1) + f.node.wcid];
-	if ((f.fc & 0x40) && (!sta->cipher || !f.sec))
+	/* Encrypted traffic keeps the host's key and replay validation. */
+	if (f.sec || (f.fc & 0x4000))
 		return 0;
-	return sta->enabled && sta->cipher <= 1;
+	return !!(sta->enabled & (1 << f.node.tid));
 }
 
 int en7523_rx_parse(u32 id, struct kite_node *node, u32 len, u32 band)
@@ -188,39 +177,13 @@ int en7523_rx_parse(u32 id, struct kite_node *node, u32 len, u32 band)
 	return 0;
 }
 
-static int rx_pn_valid(struct en7523_sta *sta, struct en7523_frame *f)
-{
-	u32 i, tid = f->node.tid;
-	int cmp = 0;
-
-	if (!sta->cipher)
-		return f->sec ? -1 : 0;
-	if (f->sec != 4 || f->key != sta->key || !(f->fc & 0x4000))
-		return -1;
-	for (i = 0; i < 6; i++) {
-		if (f->pn[i] == sta->pn[tid][i])
-			continue;
-		cmp = f->pn[i] > sta->pn[tid][i] ? 1 : -1;
-		break;
-	}
-	if (cmp < 0 || (!cmp && !(sta->amsdu[tid] &&
-	    sta->sn[tid] == f->node.sn && f->node.amsdu &&
-	    f->node.amsdu != 3)))
-		return -1;
-	for (i = 0; i < 6; i++)
-		sta->pn[tid][i] = f->pn[i];
-	sta->sn[tid] = f->node.sn;
-	sta->amsdu[tid] = f->node.amsdu > 1;
-	return 1;
-}
-
 int en7523_rx_release(u32 id, u32 len, u32 band, int reordered)
 {
 	struct en7523_frame f;
 	struct en7523_sta *sta;
 	u32 info = (reordered & 1) ? EN7523_RX_REORDERED : 0;
 	u32 addr, i, next, cur, part = 1, parts, sum = 0;
-	int pn = 0, ret = 0;
+	int ret = 0;
 
 	if (reordered & 4)
 		info |= EN7523_RX_BYPASS_BA;
@@ -230,37 +193,33 @@ int en7523_rx_release(u32 id, u32 len, u32 band, int reordered)
 	if (f.bad)
 		info = 0;
 	sta = &stations[band * (EN7523_STA_MAX + 1) + f.node.wcid];
-	if ((reordered & 2) && sta->cipher) {
-		if (!f.sec && !(f.fc & 0x4000))
-			goto host;
-		pn = rx_pn_valid(sta, &f);
-		if (pn < 0) {
-			en7523_wifi_stats[band][2]++;
-			en7523_rx_free(id);
-			return 0;
-		}
-		info |= EN7523_RX_PN_VALID;
+	/* DEL_STA invalidates queued MPDUs before their WCID can be reused. */
+	if ((reordered & 1) && (!sta->enabled || en7523_wifi_paused[band] ||
+				!en7523_wifi_enabled[band])) {
+		en7523_rx_free(id);
+		return 0;
 	}
 	addr = wifi_pkt_buf_addr + (id << 12) + f.node.hdr;
 	if (!en7523_wifi_direct[band] || !sta->enabled || !(reordered & 1) ||
 	    en7523_rx_next(id) != 0xffff ||
 	    !f.translated || f.bad || f.fragment || (f.fc & 0x0400) ||
 	    (f.fc & 0x0300) != 0x0100 || (f.fc & 0x0c) != 8 ||
-	    (!pn && sta->cipher) || (f.sec && !sta->cipher) ||
+	    f.sec || (f.fc & 0x4000) || f.node.bss >= 16 ||
 	    (*(u8 *)addr & 1) || (rx_word(addr + 12) & 0xffff) != 8 ||
 	    len - f.node.hdr < 34 || (*(u8 *)(addr + 14) >> 4) != 4 ||
-	    (*(u8 *)(addr + 14) & 15) < 5)
+	    (*(u8 *)(addr + 14) & 15) != 5 ||
+	    (rx_word(addr + 20) & 0xff3f) ||
+	    (*(u8 *)(addr + 23) != 6 && *(u8 *)(addr + 23) != 17))
 		goto host;
-	/* Routed traffic has already selected the router as its L2 destination. */
+	/* Header translation must retain the associated transmitter as SA. */
 	for (i = 0; i < 6; i++)
-		if (*(u8 *)(addr + 6 + i) != sta->addr[i] ||
-		    *(u8 *)(addr + i) != sta->router[i])
+		if (*(u8 *)(addr + 6 + i) != f.ta[i])
 			goto host;
 	/* Translation errors require the host's LLC/VLAN repair path. */
 	if (rx_word(wifi_pkt_buf_addr + (id << 12) + 8) & 0x02000000)
 		goto host;
 	if (!en7523_qdma_submit(id, addr, len - f.node.hdr, band,
-			       f.node.wcid, sta->vif, sta->generation)) {
+			       f.node.wcid, f.node.bss, sta->generation)) {
 		en7523_wifi_stats[band][0]++;
 		return 0;
 	}
@@ -292,7 +251,7 @@ host:
 	return ret;
 }
 
-/* PPE exceptions have already passed authorization, reorder and replay checks. */
+/* Keep the RX descriptor so exceptions use the normal mac80211 receive path. */
 int en7523_rx_exception(u32 id, u32 offset, u32 len, u32 band,
 			u32 wcid, u32 generation, u32 vif, u32 metadata)
 {
@@ -303,11 +262,13 @@ int en7523_rx_exception(u32 id, u32 offset, u32 len, u32 band,
 	    !en7523_wifi_enabled[band] || en7523_wifi_paused[band])
 		return -1;
 	sta = &stations[band * (EN7523_STA_MAX + 1) + wcid];
-	if (!sta->enabled || sta->generation != generation || sta->vif != vif)
+	if (!sta->enabled || sta->generation != generation || offset > 255 ||
+	    offset + len > 3500)
 		return -1;
-	ret = host_ring_submit(wifi_pkt_buf_addr + (id << 12) + offset,
-			       len, band, vif, 0, (1 << 2) | (1 << 5),
-			       len, 1, EN7523_RX_PPE | (metadata & 0x1fffff));
+	ret = host_ring_submit(wifi_pkt_buf_addr + (id << 12),
+			       offset + len, band, vif, 0, (1 << 2) | (1 << 5),
+			       offset + len, 1, EN7523_RX_PPE | EN7523_RX_REORDERED |
+			       (metadata & 0x1fffff));
 	if (!ret)
 		en7523_wifi_stats[band][1]++;
 	return ret;
@@ -332,12 +293,14 @@ int en7523_rx_control(u32 *msg)
 {
 	u32 band = msg[0] & 15, cmd = msg[1], wcid = msg[2], tid, val;
 	u32 *entry;
+	struct en7523_sta *sta;
 
 	if (band > 1 || !stations)
 		return NPU_MBOX_ENODEV;
 	if (cmd == WLAN_FUNC_SET_WAIT_HWNAT_INIT)
 		return en7523_qdma_init();
-	if (cmd != WLAN_FUNC_SET_WAIT_BA_WIN_SIZE)
+	if (cmd != WLAN_FUNC_SET_WAIT_BA_WIN_SIZE &&
+	    cmd != WLAN_FUNC_SET_WAIT_DEL_STA)
 		return NPU_MBOX_EOPNOTSUPP;
 	if (!wcid || wcid > EN7523_STA_MAX)
 		return NPU_MBOX_EINVAL;
@@ -345,6 +308,18 @@ int en7523_rx_control(u32 *msg)
 		npu_printf("[RX CONTROL] pause timeout band=%u cmd=%u wcid=%u busy=%u\n",
 			   band, cmd, wcid, en7523_wifi_busy[band]);
 		return NPU_MBOX_ERROR;
+	}
+	sta = &stations[band * (EN7523_STA_MAX + 1) + wcid];
+	if (cmd == WLAN_FUNC_SET_WAIT_DEL_STA) {
+		sta->enabled = 0;
+		sta->generation++;
+		for (tid = 0; tid < 8; tid++) {
+			entry = (u32 *)((band ? ba_table_b : ba_table_a) +
+				       28 * (8 * (wcid - 1) + tid));
+			ba_flush_entry(entry);
+			npu_memset(entry, 0, 28);
+		}
+		goto resume;
 	}
 	/* The extended BA request supplies WCID, TID, SSN and window size. */
 	tid = msg[3];
@@ -360,6 +335,11 @@ int en7523_rx_control(u32 *msg)
 	*(u16 *)((u32)entry + 18) = (msg[4] - 1) & 0xfff;
 	*(u8 *)((u32)entry + 25) = band;
 	*(u8 *)((u32)entry + 24) = val ? 4 : 0;
+	if (val)
+		sta->enabled |= 1 << tid;
+	else
+		sta->enabled &= ~(1 << tid);
+resume:
 	__asm__ volatile("fence iorw, iorw" ::: "memory");
 	en7523_wifi_paused[band] = 0;
 	return NPU_MBOX_SUCCESS;
@@ -396,11 +376,6 @@ int en7523_rx_process(u32 id, u32 len, u32 band)
 	}
 	if (!rx_decode(id, len, &f)) {
 		sta = &stations[band * (EN7523_STA_MAX + 1) + f.node.wcid];
-		if (sta->enabled && sta->cipher == 1 && f.bad &&
-		    (f.fc & 0x0c) == 8 && f.node.tid < 8) {
-			en7523_rx_free(id);
-			return -1;
-		}
 		if (sta->enabled && (f.fc & 0xfc) == 0x84 && f.node.tid < 8) {
 			entry = (u32 *)((band ? ba_table_b : ba_table_a) +
 				       28 * (8 * (f.node.wcid - 1) + f.node.tid));
@@ -423,7 +398,7 @@ int en7523_rx_process(u32 id, u32 len, u32 band)
 				return 0;
 			return en7523_rx_release(id, len, band, 3);
 		}
-		/* Fragments use host defragmentation, sharing the data replay counter. */
+		/* Fragments keep host defragmentation and advance the BA window. */
 		if (f.fragment || (f.fc & 0x0400)) {
 			u32 last;
 			int ret;

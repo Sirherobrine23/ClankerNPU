@@ -24,7 +24,7 @@ GITREV ?= $(shell git describe --always --dirty --abbrev=7 2>/dev/null || echo n
 
 NPU_VERSION_MAJOR  := 7
 NPU_VERSION_MINOR  := $(if $(filter EN7523_MT7915,$(SOC)_$(WIFI)),14,13)
-NPU_VERSION_REV    := 0
+NPU_VERSION_REV    := $(if $(filter EN7523_MT7915,$(SOC)_$(WIFI)),1,0)
 NPU_VERSION_STABLE := 0
 
 ifeq ($(SOC),EN7523)

@@ -51,7 +51,7 @@ void mbox_isr(int src)
 	rptr = REG32(MBQ_CTRL3(mbox_idx)) & 0xFFFF;
 
 	func_idx = (rptr >> 11) & 0xF;
-	if (func_idx >= MAX_MBOX_FUNC) {
+	if (func_idx >= MAX_FUNC_MBOX) {
 		ret = NPU_MBOX_EINVAL;
 		goto respond;
 	}

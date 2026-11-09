@@ -13,6 +13,11 @@
  * ================================================================ */
 
 #define REORDER_NODE_SIZE      36
+#ifdef EN7523
+#define BA_WCID_MAX EN7523_STA_MAX
+#else
+#define BA_WCID_MAX (wifi_dbdc_mode ? 300 : 150)
+#endif
 
 NPU_HOT void reorder_node_free(u16 node_idx, u8 node_type, u32 band)
 {
@@ -333,6 +338,12 @@ static NPU_HOT u32 *ba_band_entry(u32 band, u32 wcid, u32 tid)
 	u32 off = (wcid - 1) * 224 + tid * 28;
 	u32 e;
 
+#ifdef EN7523
+	e = (band ? ba_table_b : ba_table_a) + off;
+	if (*(u8 *)(e + 24) != 4)
+		return NULL;
+	return (u32 *)e;
+#endif
 	if (wifi_dbdc_mode == 0) {
 		e = (band != 0 ? ba_table_b : ba_table_a) + off;
 		if (e == 0 || *(u8 *)(e + 24) != 4)
@@ -352,7 +363,7 @@ static NPU_HOT u32 *ba_band_entry(u32 band, u32 wcid, u32 tid)
 NPU_HOT void ba_timeout_scan(u32 band)
 {
 	u32 now = KITE_TICK;
-	u32 max = wifi_dbdc_mode ? 300 : 150;
+	u32 max = BA_WCID_MAX;
 	u32 wcid, tid;
 	u32 *e;
 
@@ -368,7 +379,7 @@ NPU_HOT void ba_timeout_scan(u32 band)
 /* no rx buffer left: release everything the band holds */
 void ba_flush_all(u32 band)
 {
-	u32 max = wifi_dbdc_mode ? 300 : 150;
+	u32 max = BA_WCID_MAX;
 	u32 wcid, tid;
 	u32 *e;
 

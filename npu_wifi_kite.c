@@ -604,8 +604,12 @@ int wifi_mail_set_driver_model_cmd(u32 *msg)
 
 int wifi_mail_set_del_sta(u32 *msg)
 {
+#ifdef EN7523
+	return en7523_rx_control(msg);
+#else
 	wifi_reset_ba_entry(msg[0] & 0xF, msg[2]);
 	return 1;
+#endif
 }
 
 int wifi_mail_set_dram_ba_node(u32 *msg)

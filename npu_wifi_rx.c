@@ -198,6 +198,11 @@ static s32 kite_classify(s32 buf_id, u32 len, u32 band)
 		return -1;
 	}
 
+#ifdef EN7523
+	/* The host allocates WCIDs globally and supplies the RX channel. */
+	e = (band ? ba_table_b : ba_table_a) +
+	    28 * (8 * (pn.wcid - 1) + pn.tid);
+#else
 	if (wifi_dbdc_mode != 0) {
 		if (pn.wcid > 150)
 			e = ba_table_a + 28 * (8 * (pn.wcid - 151) + pn.tid);
@@ -207,6 +212,7 @@ static s32 kite_classify(s32 buf_id, u32 len, u32 band)
 		e = (band != 0 ? ba_table_b : ba_table_a) +
 		    28 * (8 * (pn.wcid - 1) + pn.tid);
 	}
+#endif
 	entry = (u32 *)e;
 
 	if (*(u8 *)(e + 24) == 0) {
