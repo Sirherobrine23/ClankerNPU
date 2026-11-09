@@ -97,6 +97,8 @@ static int en7523_wifi_run(u32 band, u32 enable)
 {
 	u32 i, base;
 
+	npu_printf("en7523_wifi_run: band=%u enable=%u\n", band, enable);
+
 	if (enable > 1)
 		return NPU_MBOX_EINVAL;
 	if (!enable) {
@@ -117,20 +119,35 @@ static int en7523_wifi_run(u32 band, u32 enable)
 		}
 		return NPU_MBOX_ERROR;
 	}
-	if (!en7523_wifi_prepared[band])
+
+	if (!en7523_wifi_prepared[band]) {
+		npu_printf("Error: en7523_wifi_run: band=%u not prepared\n", band);
 		return NPU_MBOX_ENODEV;
+	}
+
 	base = REG32(HOSTADPT_RX_BASE_PTR(band));
 	if ((base & 3) || base < 0x80000000 || base > 0xbfffd000 ||
-	    REG32(HOSTADPT_RX_MAX_CNT(band)) != 512)
+	    REG32(HOSTADPT_RX_MAX_CNT(band)) != 512) {
+		npu_printf("Error: en7523_wifi_run: band=%u invalid ring base 0x%x\n", band, base);
 		return NPU_MBOX_EINVAL;
-	if (en7523_wifi_enabled[band])
+	}
+
+	if (en7523_wifi_enabled[band]) {
+		npu_printf("Info: en7523_wifi_run: band=%u already enabled\n", band);
 		return NPU_MBOX_SUCCESS;
+	}
+
 	hostadpt_rx_init(band);
 	en7523_wifi_total[band] = 0;
 	en7523_wifi_part[band] = 0;
 	en7523_wifi_drop[band] = 0;
 	en7523_wifi_fence();
 	en7523_wifi_enabled[band] = 1;
+
+	npu_printf("en7523_wifi_run: band=%u enabled, ring=0x%x\n", band, base);
+
+	en7523_qdma_init(); /* Debug test */
+
 	return NPU_MBOX_SUCCESS;
 }
 
@@ -158,9 +175,10 @@ int en7523_wifi_set(u32 *msg)
 	case WLAN_FUNC_SET_WAIT_DESC:
 		return en7523_wifi_prepare(band, val);
 	case WLAN_FUNC_SET_WAIT_DRIVER_MODEL:
-		if (val > 1)
+		if (val != AIROHA_NPU_WLAN_MT7915A &&
+		    val != AIROHA_NPU_WLAN_MT7915D)
 			return NPU_MBOX_EOPNOTSUPP;
-		npu_set_driver_model(val);
+		npu_set_driver_model(val == AIROHA_NPU_WLAN_MT7915D);
 		break;
 	case WLAN_FUNC_SET_WAIT_PKT_BUF_ADDR:
 		if (val < 0x80000000 ||
@@ -294,16 +312,24 @@ void en7523_wifi_rx_loop(u32 band)
 	npu_dbg_loop(NDBG_TAG('W', 'R', 'X', '0') + band);
 	while (1) {
 		npu_dbg_poll();
+		/* A paused worker must stay idle until the mailbox releases it. */
+		if (en7523_wifi_paused[band]) {
+			en7523_wifi_busy[band] = 0;
+			en7523_wifi_fence();
+			continue;
+		}
 		en7523_wifi_busy[band] = 1;
 		en7523_wifi_fence();
-		en7523_ppe_rx_poll(band);
-		if (en7523_wifi_enabled[band] &&
-		    !en7523_wifi_paused[band]) {
-			for (i = 0; i < EN7523_RX_BATCH; i++)
-				if (!en7523_wifi_rx(band))
-					break;
-			en7523_rx_poll(band);
-			hostadpt_rx_flush(band);
+		/* Close the race with a pause posted before busy became visible. */
+		if (!en7523_wifi_paused[band]) {
+			en7523_ppe_rx_poll(band);
+			if (en7523_wifi_enabled[band]) {
+				for (i = 0; i < EN7523_RX_BATCH; i++)
+					if (!en7523_wifi_rx(band))
+						break;
+				en7523_rx_poll(band);
+				hostadpt_rx_flush(band);
+			}
 		}
 		en7523_wifi_fence();
 		en7523_wifi_busy[band] = 0;

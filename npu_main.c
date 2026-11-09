@@ -384,10 +384,12 @@ void core_dispatch(int a0, int a1)
 	case 1:
 		npu_printf("en7523_wifi_rx_loop\n");
 		en7523_wifi_rx_loop(0);
+		npu_printf("en7523_wifi_rx_loop done\n");
 		break;
 	case 2:
 		npu_printf("en7523_wifi_rx_loop\n");
 		en7523_wifi_rx_loop(1);
+		npu_printf("en7523_wifi_rx_loop done\n");
 		break;
 	case 3:
 		npu_printf("en7523_qdma_loop\n");

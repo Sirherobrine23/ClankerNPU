@@ -131,20 +131,20 @@ void mailbox_init(void)
 
 	/* register handlers into core 0's callback slots */
 	callbacks = (u32 *)&mbox_dispatch[0][48];
-	callbacks[0] = (u32)(void *)wifi_mail_dispatch;
+	callbacks[NPU_FUNC_WIFI] = (u32)(void *)wifi_mail_dispatch;
 #ifndef EN7523
-	callbacks[1] = (u32)(void *)tunnel_mail_dispatch;
+	callbacks[NPU_FUNC_TUNNEL] = (u32)(void *)tunnel_mail_dispatch;
 #endif
 
 #ifdef HAS_TR471
 #ifdef WIFI_KITE
-	callbacks[4] = (u32)(void *)kite_wifi_config;
+	callbacks[NPU_FUNC_TR471] = (u32)(void *)kite_wifi_config;
 #elif defined(WIFI_EAGLE)
-	callbacks[4] = (u32)(void *)eagle_wifi_config;
+	callbacks[NPU_FUNC_TR471] = (u32)(void *)eagle_wifi_config;
 #endif
 #endif
 
-	callbacks[5] = (u32)(void *)hwnat_mail_dispatch;
+	callbacks[NPU_FUNC_PPE] = (u32)(void *)hwnat_mail_dispatch;
 
 #ifdef HAS_DBA
 	{

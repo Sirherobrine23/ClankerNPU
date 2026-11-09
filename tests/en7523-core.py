@@ -370,16 +370,21 @@ failures = (
     (dict(msg_type=1, cmd=32), EOPNOTSUPP),
     (dict(msg_type=1, cmd=33), EOPNOTSUPP),
     (dict(msg_type=1, cmd=34), EOPNOTSUPP),
+    (dict(msg_type=1, cmd=35), EOPNOTSUPP),
+    (dict(msg_type=1, cmd=34, size=36), EOPNOTSUPP),
+    (dict(msg_type=1, cmd=35, size=112), EOPNOTSUPP),
     (dict(msg_type=2, cmd=10), EOPNOTSUPP),
     (dict(msg_type=4, cmd=10), EOPNOTSUPP),
     (dict(cmd=10, size=8), EINVAL),
     (dict(arg=0x21), EOPNOTSUPP),
 )
 for kwargs, expected in failures:
-    if wifi and kwargs in (dict(msg_type=1), dict(msg_type=1, cmd=34)):
+    if wifi and kwargs == dict(msg_type=1):
         expected = EINVAL
     if wifi and kwargs == dict(msg_type=1, cmd=30):
         expected = ENODEV
+    if wifi and kwargs == dict(msg_type=1, cmd=31):
+        expected = EINVAL
     control,info=request(**kwargs)
     assert control&0x1e == (expected<<2)|2, (kwargs,control,expected)
     assert info==0xffffffff, 'rejection must leave the payload untouched'

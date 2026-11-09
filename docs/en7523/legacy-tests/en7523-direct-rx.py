@@ -1,4 +1,5 @@
-# Execute the linked firmware through its RX rings and SDK mailbox.
+# Historical fixtures for the removed experimental station/key wire protocol.
+# Kept as backend reference; not executed by the current SDK-mailbox tests.
 import subprocess
 
 symbols = {fields[2]: int(fields[0], 16) for line in subprocess.check_output(
@@ -97,6 +98,9 @@ load(0x1fb54068, (0).to_bytes(4, 'little'))
 # Key replacement brackets the chip operation; no old RX descriptor survives it.
 control_data(35, struct.pack('<II96s', 1, 1<<31, b''))
 assert read(symbol('en7523_wifi_paused')) == 1
+for _ in range(2000):
+    tick(1)
+    assert read(symbol('en7523_wifi_busy')) == 0, 'paused RX worker became busy'
 control_data(35, struct.pack('<II96s', 1, 1, b''))
 assert read(symbol('en7523_wifi_paused')) == 0
 control_data(4, struct.pack('<IIII', 1, 0, 20, 64))
@@ -207,11 +211,22 @@ blob, _ = rx_frame(34, 113)
 packet(0, blob)
 check_host(0, head, blob, len(blob), 1, 1, True, vendor=0x40000000)
 
-# Disassociation disables direct forwarding and discards the station context.
+# Deauthorization disables forwarding without resetting the installed key's PN.
 control_data(34, struct.pack('<III8s8s', 1, 0, 3, mac, bytes.fromhex('020102030405')))
 head = read(0x1ec0d188)
 blob, _ = rx_frame(35, 114)
 packet(0, blob)
 check_host(0, head, blob, len(blob), 1, 1, True)
+
+control_data(34, struct.pack('<III8s8s', 1, 1, 3, mac, bytes.fromhex('020102030405')))
+control_data(4, struct.pack('<IIII', 1, 0, 36, 64))
+before_pn = read(symbol('en7523_wifi_stats')+8)
+before_tail = read(0x1fb541c8)
+blob, _ = rx_frame(36, 112)
+packet(0, blob)
+assert read(symbol('en7523_wifi_stats')+8) == before_pn+1
+assert read(0x1fb541c8) == before_tail, 'reauthorization reset the key PN'
+# Reset the WCID for the subsequent native-PPE tests.
+control_data(35, struct.pack('<II96s', 1, 0, b''))
 exec((Path(__file__).parent / 'en7523-native-ppe.py').read_text())
 print('PASS: NPU RX -> QDMA TX6, no host copies, BA/timeout, PN replay, A-MSDU, fragments, completion ownership, key barrier, L2/ARP fallback, TX congestion, WCID bounds and teardown')

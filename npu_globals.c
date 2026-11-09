@@ -141,8 +141,6 @@ wifi_mail_fn_t set_wait_func_table[WLAN_FUNC_SET_WAIT_MAX]
 	[WLAN_FUNC_SET_WAIT_ARHT_CHIP_INFO] = wifi_mail_set_arht_chip_info,
 #ifdef EN7523
 	[WLAN_FUNC_SET_WAIT_HWNAT_INIT] = en7523_rx_control,
-	[WLAN_FUNC_SET_WAIT_EN7523_STA] = en7523_rx_control,
-	[WLAN_FUNC_SET_WAIT_EN7523_KEY] = en7523_rx_control,
 #endif
 #elif defined(WIFI_EAGLE)
 	[WLAN_FUNC_SET_WAIT_PCIE_ADDR] = eagle_mail_set_pcie_addr,

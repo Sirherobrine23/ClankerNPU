@@ -783,6 +783,22 @@ extern volatile u32 kite_wifi_cfg[26];
 extern volatile u32 kite_test_active;
 #endif
 
+enum mailbox_callbacks {
+	NPU_FUNC_WIFI = 0,
+	NPU_FUNC_TUNNEL,
+	NPU_FUNC_NOTIFY,
+	NPU_FUNC_DBA,
+	NPU_FUNC_TR471,
+	NPU_FUNC_PPE,
+};
+
+enum func_type {
+	NPU_OP_SET = 1,
+	NPU_OP_SET_NO_WAIT,
+	NPU_OP_GET,
+	NPU_OP_GET_NO_WAIT,
+};
+
 /* ================================================================
  * Field debug block: fixed SRAM window the host reads and writes
  * with sys memrl / memwl at NDBG_BASE & 0x1FFFFFFF. See docs/debug.md.

@@ -1,4 +1,5 @@
-# Native PPE ownership and host exception tests, executing the linked firmware.
+# Historical backend fixtures requiring the removed station/key wire protocol.
+# Kept as reference alongside en7523-direct-rx.py, outside the active suite.
 print("Checking native PPE lifetime and exception delivery", flush=True)
 
 def wait_until(predicate, label, limit=80000):

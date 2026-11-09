@@ -324,83 +324,45 @@ static int rx_pause(u32 band)
 			return 0;
 		delay_ms_mcycle(1);
 	}
-	en7523_wifi_paused[band] = 0;
+	/* Keep RX paused when the ownership handoff cannot be acknowledged. */
 	return -1;
 }
 
 int en7523_rx_control(u32 *msg)
 {
-	u32 band = msg[0] & 15, cmd = msg[1], wcid = msg[2], i, tid, val;
-	struct en7523_sta *sta;
+	u32 band = msg[0] & 15, cmd = msg[1], wcid = msg[2], tid, val;
 	u32 *entry;
 
 	if (band > 1 || !stations)
 		return NPU_MBOX_ENODEV;
 	if (cmd == WLAN_FUNC_SET_WAIT_HWNAT_INIT)
 		return en7523_qdma_init();
+	if (cmd != WLAN_FUNC_SET_WAIT_BA_WIN_SIZE)
+		return NPU_MBOX_EOPNOTSUPP;
 	if (!wcid || wcid > EN7523_STA_MAX)
 		return NPU_MBOX_EINVAL;
-	if (rx_pause(band))
+	if (rx_pause(band)) {
+		npu_printf("[RX CONTROL] pause timeout band=%u cmd=%u wcid=%u busy=%u\n",
+			   band, cmd, wcid, en7523_wifi_busy[band]);
 		return NPU_MBOX_ERROR;
-	sta = &stations[band * (EN7523_STA_MAX + 1) + wcid];
-	/* Invalidate packets still owned by the PPE across rekey or STA reuse. */
-	if (cmd == WLAN_FUNC_SET_WAIT_EN7523_STA ||
-	    cmd == WLAN_FUNC_SET_WAIT_EN7523_KEY)
-		sta->generation++;
-	if (cmd == WLAN_FUNC_SET_WAIT_EN7523_KEY && msg[3] & 0x80000000)
-		return NPU_MBOX_SUCCESS;
-	switch (cmd) {
-	case WLAN_FUNC_SET_WAIT_EN7523_STA:
-		if (msg[3] > 1 || msg[4] >= 16)
-			goto invalid;
-		if (!msg[3]) {
-			u16 generation = sta->generation;
-
-			sta->enabled = 0;
-			wifi_reset_ba_entry(band, wcid);
-			npu_memset(sta, 0, sizeof(*sta));
-			sta->generation = generation;
-		}
-		sta->enabled = msg[3];
-		sta->vif = msg[4];
-		for (i = 0; i < 6; i++) {
-			sta->addr[i] = ((u8 *)&msg[5])[i];
-			sta->router[i] = ((u8 *)&msg[7])[i];
-		}
-		break;
-	case WLAN_FUNC_SET_WAIT_EN7523_KEY:
-		en7523_wifi_discard(band);
-		for (i = 0; i < 8; i++)
-			ba_flush_entry((u32 *)((band ? ba_table_b : ba_table_a) +
-				       28 * (8 * (wcid - 1) + i)));
-		sta->cipher = msg[3] & 0xff;
-		sta->key = (msg[3] >> 8) & 3;
-		npu_memcpy(sta->pn, &msg[4], sizeof(sta->pn));
-		npu_memset(sta->amsdu, 0, sizeof(sta->amsdu));
-		break;
-	case WLAN_FUNC_SET_WAIT_BA_WIN_SIZE:
-		/* The extended request supplies WCID, TID, SSN and window size. */
-		tid = msg[3];
-		val = msg[5];
-		if (tid > 7 || val > 256)
-			goto invalid;
-		entry = (u32 *)((band ? ba_table_b : ba_table_a) +
-			       28 * (8 * (wcid - 1) + tid));
-		ba_flush_entry(entry);
-		*(u16 *)((u32)entry + 16) = val;
-		*(u16 *)((u32)entry + 18) = (msg[4] - 1) & 0xfff;
-		*(u8 *)((u32)entry + 25) = band;
-		*(u8 *)((u32)entry + 24) = val ? 4 : 0;
-		break;
-	default:
-		goto invalid;
 	}
+	/* The extended BA request supplies WCID, TID, SSN and window size. */
+	tid = msg[3];
+	val = msg[5];
+	if (tid > 7 || val > 256) {
+		en7523_wifi_paused[band] = 0;
+		return NPU_MBOX_EINVAL;
+	}
+	entry = (u32 *)((band ? ba_table_b : ba_table_a) +
+		       28 * (8 * (wcid - 1) + tid));
+	ba_flush_entry(entry);
+	*(u16 *)((u32)entry + 16) = val;
+	*(u16 *)((u32)entry + 18) = (msg[4] - 1) & 0xfff;
+	*(u8 *)((u32)entry + 25) = band;
+	*(u8 *)((u32)entry + 24) = val ? 4 : 0;
 	__asm__ volatile("fence iorw, iorw" ::: "memory");
 	en7523_wifi_paused[band] = 0;
 	return NPU_MBOX_SUCCESS;
-invalid:
-	en7523_wifi_paused[band] = 0;
-	return NPU_MBOX_EINVAL;
 }
 
 void en7523_rx_poll(u32 band)

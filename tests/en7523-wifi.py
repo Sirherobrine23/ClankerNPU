@@ -196,8 +196,6 @@ tick(1000)
 assert host_doorbells == before, 'idle workers generated host interrupts'
 print('PASS: 37 RX frames use two host doorbells; idle workers do not notify')
 
-exec((Path(__file__).parent / 'en7523-direct-rx.py').read_text())
-
 # STOP must also wait for a copy that was already in flight.
 band=0
 index=read(symbol('en7523_wifi_index'))

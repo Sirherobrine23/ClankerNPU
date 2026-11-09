@@ -4,6 +4,11 @@ mask = read(mask_addr)
 assert mask & (1<<9), 'RX summary must be enabled by default'
 original_gate = read(0x1ec0c194)
 
+# Telemetry tests own their counters rather than relying on earlier traffic.
+for reason in (0x0f, 0x15):
+    addr = symbol('ppe_cpu_reasons') + reason * 4
+    load(addr, (read(addr) + 1).to_bytes(4, 'little'))
+
 def advance_log_time():
     load(symbol('timer_int_count'),
          (read(symbol('timer_int_count'))+500).to_bytes(4, 'little'))

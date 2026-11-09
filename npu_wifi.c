@@ -89,8 +89,7 @@ int wifi_mail_dispatch(u32 base, u32 cnt)
 #endif
 #if defined(EN7523) && defined(HAS_WIFI)
 	if (((msg[0] >> 4) & 15) == 1 &&
-	    ((msg[1] == WLAN_FUNC_SET_WAIT_EN7523_STA && cnt < 36) ||
-	     (msg[1] == WLAN_FUNC_SET_WAIT_EN7523_KEY && cnt < 112) ||
+	    ((msg[1] == WLAN_FUNC_SET_WAIT_ARHT_CHIP_INFO && cnt < 40) ||
 	     (msg[1] == WLAN_FUNC_SET_WAIT_BA_WIN_SIZE && cnt < 24)))
 		return NPU_MBOX_EINVAL;
 	if (((msg[0] >> 4) & 15) == 3 &&
@@ -106,23 +105,28 @@ int wifi_mail_dispatch(u32 base, u32 cnt)
 #endif
 	NDBG_TRACE(NDBG_WIFI, func_type << 8 | (msg[1] & 0xFF),
 		   msg[2], cnt >= 16 ? msg[3] : 0);
+
 	switch (func_type) {
-	case 1:
+	case NPU_OP_SET:
 		if (msg[1] >= WLAN_FUNC_SET_WAIT_MAX)
 			return wifi_mail_exceed(msg, 1);
+
 		return wifi_mail_call(set_wait_func_table[msg[1]], msg, "set_wait");
-	case 2:
+	case NPU_OP_SET_NO_WAIT:
 		/* no set_nowait handler is installed */
 		if (msg[1])
 			return wifi_mail_exceed(msg, 2);
+
 		return wifi_mail_call(NULL, msg, "set_nowait");
-	case 3:
+	case NPU_OP_GET:
 		if (msg[1] >= WLAN_FUNC_GET_WAIT_MAX)
 			return wifi_mail_exceed(msg, 3);
+
 		return wifi_mail_call(get_wait_func_table[msg[1]], msg, "get_wait");
-	case 4:
+	case NPU_OP_GET_NO_WAIT:
 		if (msg[1])
 			return wifi_mail_exceed(msg, 4);
+
 		return wifi_mail_call(NULL, msg, "get_nowait");
 	default:
 		npu_printf("not support unknow funcType\n");

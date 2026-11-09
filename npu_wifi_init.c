@@ -255,12 +255,19 @@ static u32 wifi_pcie_desc_offset(u32 base, u32 type)
 /* WiFi get DBDC mode from driver model */
 static u8 wifi_get_dbdc_mode(u8 model)
 {
-	if (model == 1 || model == 2) {
-		npu_printf("DriverModel(%d) %s Support DBDC\n", model, "");
-		return 1;
+	char* isNot = "";
+	u8 ret = 0;
+	switch (model) {
+	case 1:
+	case 2:
+		ret = 1;
+		break;
+	default:
+		isNot = " Not";
+		break;
 	}
-	npu_printf("DriverModel(%d) %s Support DBDC\n", model, "Not");
-	return 0;
+	npu_printf("DriverModel (%d)%s Support DBDC\n", model, isNot);
+	return ret;
 }
 
 /* WiFi offload on this package? */
@@ -268,7 +275,7 @@ static u8 wifi_get_band_cap(u8 model)
 {
 	u32 chip_rev = REG32(CHIP_ID_REG) >> 16;
 	u32 variant = (REG32(CHIP_VARIANT_REG) & 0xF) |
-		      ((REG32(CHIP_VARIANT_REG) >> 3) & 0x10);
+				  ((REG32(CHIP_VARIANT_REG) >> 3) & 0x10);
 
 	if (model != 0) {
 		if (chip_rev == 15 && variant == 1) {
@@ -281,11 +288,19 @@ static u8 wifi_get_band_cap(u8 model)
 	}
 
 	/* model 0: only these chip 12 packages */
-	if (chip_rev == 12 && (variant == 0 || variant == 1 ||
-			       variant == 11 || variant == 3 ||
-			       variant == 4 || variant == 12)) {
-		npu_printf("Chip id(%x) support NPU Wifi ffload\n", variant);
-		return 1;
+	if (chip_rev == 12) {
+		switch(variant) {
+		case 0:
+		case 1:
+		case 3:
+		case 4:
+		case 11:
+		case 12:
+			npu_printf("Chip id(%x) support NPU Wifi ffload\n", variant);
+			return 1;
+		default:
+			break;
+		}
 	}
 	npu_printf("Chip id(%x) does not support NPU Wifi ffload!!!\n",
 		   variant);
