@@ -10,7 +10,12 @@
 #define CHIP_VARIANT_REG        0x1FB00284
 
 /* NPU cluster (boot control), eight core slots on every part */
+/* EN7523 NPU v1 uses a different cluster and PC-debug bank. */
+#ifdef EN7523
+#define NPU_CLUSTER_BASE        0x1EC08000
+#else
 #define NPU_CLUSTER_BASE        0x1EC06000
+#endif
 #define CR_CORE_BOOT_TRIGGER    (NPU_CLUSTER_BASE + 0x000)
 #define CR_CORE_BOOT_CONFIG     (NPU_CLUSTER_BASE + 0x004)
 #define CR_CORE_BOOT_BASE(n)    (NPU_CLUSTER_BASE + 0x020 + ((n) << 2))
@@ -30,7 +35,11 @@
 #define NPU_MIB31               NPU_MIB(31)
 
 /* NPU debug CSR, live PC/SP/RA per core slot; 0 while it never fetched */
+#ifdef EN7523
+#define NPU_DEBUG_BASE          0x1EC08800
+#else
 #define NPU_DEBUG_BASE          0x1EC05000
+#endif
 #define NPU_CSR_PC(core)        (NPU_DEBUG_BASE + ((core) * 0x100) + 0x00)
 #define NPU_CSR_SP(core)        (NPU_DEBUG_BASE + ((core) * 0x100) + 0x04)
 #define NPU_CSR_RA(core)        (NPU_DEBUG_BASE + ((core) * 0x100) + 0x08)
@@ -69,8 +78,8 @@
  * chip behind each port may reach */
 #define PCIE0_WIN_BASE          0x1FA90038
 #define PCIE0_WIN_END           0x1FA9003C
-#if defined(AN7552)
-/* AN7552: second window sits beside the first */
+#if defined(AN7552) || defined(EN7523)
+/* EN7523 and AN7552: second window sits beside the first */
 #define PCIE1_WIN_BASE          0x1FA90030
 #define PCIE1_WIN_END           0x1FA90034
 /* WiFi link state; 6 disables the tunnel offload */

@@ -388,7 +388,7 @@ int boot_printf(const char *fmt, ...)
 	};
 
 	/* output core prefix */
-	for (int i; i < ARRAY_SIZE(corePrefix); i++) {
+	for (int i = 0; i < ARRAY_SIZE(corePrefix); i++) {
 		while (!(REG32(BOOT_UART_STATUS) & UART_TX_READY_BIT));
 		REG32(BOOT_UART_TX) = corePrefix[i];
 	}

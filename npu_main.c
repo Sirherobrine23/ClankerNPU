@@ -113,7 +113,7 @@ static void npu_banner(void)
 {
 	u32 i;
 
-	for (i = 0; i < sizeof(bender) / sizeof(bender[0]); i++)
+	for (i = 0; i < ARRAY_SIZE(bender); i++)
 		npu_printf("%s\n", bender[i]);
 }
 
@@ -396,6 +396,8 @@ void core_dispatch(int a0, int a1)
 	case 3:
 		core3_main();
 		break;
+#endif
+#if MAX_CORE_NUM > 4
 	case 4:
 		core4_main();
 		break;
@@ -597,9 +599,9 @@ void npu_init(void)
 		boot_uart_init();
 		npu_dbg_init();
 		REG32(NPU_MIB21) = mib21;
-		npu_banner();
 		npu_printf("core freq at %d MHz\n", cpu_clock_get());
 		npu_printf("NPU Version: %s\n", NPU_VERSION);
+		npu_banner();
 		npu_core_probe();
 		if ((u32)__bss_end - NPU_SRAM_BASE > GLB_VAR_SRAM_SIZE)
 			npu_printf("Error: OVER GLB_VAR_SRAM_SIZE. "
