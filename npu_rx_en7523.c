@@ -239,7 +239,8 @@ int en7523_rx_release(u32 id, u32 len, u32 band, int reordered)
 			goto host;
 		}
 	}
-	if (f.bad)
+	/* Protected frames must retain host duplicate and PN validation. */
+	if (f.bad || f.sec || (f.fc & 0x4000))
 		info = 0;
 	sta = &stations[band * (EN7523_STA_MAX + 1) + f.node.wcid];
 	/* DEL_STA invalidates queued MPDUs before their WCID can be reused. */
@@ -544,7 +545,8 @@ static int en7523_rx_process_frame(u32 id, u32 len, u32 band)
 				if (classified < 0)
 					return 0;
 			}
-			return en7523_rx_release_timed(id, len, band, 3);
+			/* Kite did not take ownership: return via the raw host path. */
+			return en7523_rx_release_timed(id, len, band, 0);
 		}
 		/* Fragments keep host defragmentation and advance the BA window. */
 		if (f.fragment || (f.fc & 0x0400)) {
