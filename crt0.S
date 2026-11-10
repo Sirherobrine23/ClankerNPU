@@ -1,8 +1,9 @@
 /*
- * AN75XX NPU firmware startup
+ * ClankerNPU firmware startup
  *
  * Reset vector at 0x84000000. Sets GP, clears BSS (cold boot only),
  * assigns per-hart stack, calls npu_init() then core_dispatch().
+ * EN7523 retains its md32rv cache/MPIS prefix and cold-boot BSS barrier.
  *
  * Hart count: AN7552=2, AN7583=6, AN7581=8.
  * Unmatched harts fall through to the hart-0 path.
@@ -10,79 +11,154 @@
 
 #include "npu_config.h"
 
+#ifdef EN7523
+/* EN7523 md32rv startup, reconstructed from the documented boot sequence. */
+	.option norvc
+	.option norelax
+	.section .text.init, "ax", @progbits
+	.global _start
+	.global en7523_prologue_end
+_start:
+/* Keep this prefix byte-identical to the five observed EN7523 profiles. */
+	addi x0, x0, 0
+	addi x0, x0, 0
+	addi x0, x0, 0
+	addi x0, x0, 0
+	addi x0, x0, 0
+	addi x0, x0, 0
+	addi x0, x0, 0
+	addi x0, x0, 0
+	addi x10, x0, 259
+	csrrc x0, 0x7c0, x10
+	addi x10, x0, 3
+	csrrs x0, 0x7c0, x10
+	addi x10, x0, 24
+	.insn i 0x0f, 4, x0, a0, 0 /* md.cache.op a0 */
+	addi x10, x0, 8
+	.insn i 0x0f, 4, x0, a0, 0 /* md.cache.op a0 */
+	addi x10, x0, 0
+	ori x10, x10, 864
+	csrrw x0, 0x9e0, x10
+	addi x10, x0, 1024
+	csrrw x0, 0x9f0, x10
+	lui x10, 0x1c000
+	ori x10, x10, 224
+	csrrw x0, 0x9e1, x10
+	lui x10, 0x1e800
+	csrrw x0, 0x9f1, x10
+	lui x10, 0x1e800
+	ori x10, x10, 992
+	csrrw x0, 0x9e2, x10
+	lui x10, 0x1e860
+	csrrw x0, 0x9f2, x10
+	lui x10, 0x1e860
+	ori x10, x10, 224
+	csrrw x0, 0x9e3, x10
+	lui x10, 0x20000
+	csrrw x0, 0x9f3, x10
+	lui x10, 0x20000
+	ori x10, x10, 224
+	csrrw x0, 0x9e4, x10
+	lui x10, 0x30000
+	csrrw x0, 0x9f4, x10
+	lui x10, 0x30000
+	ori x10, x10, 192
+	csrrw x0, 0x9e5, x10
+	lui x10, 0x30004
+	csrrw x0, 0x9f5, x10
+	lui x10, 0x30000
+	csrrw x0, 0x9dd, x10
+	lui x10, 0x30004
+	csrrw x0, 0x9df, x10
+	lui x10, 0x80000
+	ori x10, x10, 992
+	csrrw x0, 0x9e6, x10
+	lui x10, 0xc0000
+	csrrw x0, 0x9f6, x10
+	addi x10, x0, 127
+	csrrw x0, 0x9c0, x10
+	addi x10, x0, 259
+	csrrs x0, 0x7c0, x10
+	fence.i
+	addi x10, x0, 259
+	csrrc x0, 0x7c0, x10
+	fence.i
+	addi x10, x0, 313
+	csrrs x0, 0x7c0, x10
+	fence.i
+en7523_prologue_end:
+	csrci mstatus, 8
+	csrw mie, zero
+	csrr a0, mhartid
+	li t0, 4
+	bgeu a0, t0, .Lpark
+	la sp, __stack_base
+	addi t0, a0, 1
+	slli t0, t0, 14
+	add sp, sp, t0
+	la gp, __global_pointer$
+	la t1, .Learly_trap
+	csrw mtvec, t1
+	beqz a0, .Lprimary
+.Lwait_bss:
+	la t1, __en7523_bss_ready
+	lw t2, 0(t1)
+	beqz t2, .Lwait_bss
+	fence rw, rw
+	j .Lmain
+.Lprimary:
+	la t1, __bss_start
+	la t2, __bss_end
+.Lbss:
+	bgeu t1, t2, .Lbss_done
+	sw zero, 0(t1)
+	addi t1, t1, 4
+	j .Lbss
+.Lbss_done:
+	fence rw, rw
+	la t1, __en7523_bss_ready
+	li t2, 1
+	sw t2, 0(t1)
+	fence rw, rw
+.Lmain:
+	call npu_init
+	li a0, 0
+	li a1, 0
+	call core_dispatch
+	.global en7523_park
+en7523_park:
+.Lpark:
+	j .Lpark
+
+	.balign 4
+.Learly_trap:
+	csrci mstatus, 8
+	csrw mie, zero
+	la t1, .Lpark
+	csrw mtvec, t1
+	j .Lpark
+
+	/* Reloaded by the host before every cold boot; not cleared as BSS. */
+	.section .data, "aw", @progbits
+	.balign 4
+	.global __en7523_bss_ready
+__en7523_bss_ready:
+	.word 0
+
+#else
+
 #define NPU_MIB0   0x1EC0C140
 
     .section .text.init, "ax", @progbits
     .globl _start
     .type  _start, @function
 _start:
-    /* Vendor reset vector is eight 32-bit NOPs (0x20 bytes). */
     .rept 8
-    .4byte 0x00000013
+    nop
     .endr
 
-#ifdef EN7523
-    /* EN7523 vendor entry 0x84000020..0x84000104 (all 7 images).
-     * Private CSR address translators / cache regions are required BEFORE
-     * any load from the 0x1e8/0x1e9 local SRAM windows. Preserve the
-     * vendor constants; cache op 0x0005400f is not in base RISC-V ISA.
-     * See docs/en7523-vendor.md for the extracted instruction sequence.
-     */
-    li      a0, 0x103
-    csrc    0x7c0, a0
-    li      a0, 3
-    csrs    0x7c0, a0
-    li      a0, 0x18
-    .4byte  0x0005400f
-    li      a0, 8
-    .4byte  0x0005400f
-    li      a0, 0x360
-    csrw    0x9e0, a0
-    li      a0, 0x400
-    csrw    0x9f0, a0
-    li      a0, 0x1c0000e0
-    csrw    0x9e1, a0
-    li      a0, 0x1e800000
-    csrw    0x9f1, a0
-    li      a0, 0x1e8003e0
-    csrw    0x9e2, a0
-    li      a0, 0x1e860000
-    csrw    0x9f2, a0
-    li      a0, 0x1e8600e0
-    csrw    0x9e3, a0
-    li      a0, 0x20000000
-    csrw    0x9f3, a0
-    li      a0, 0x200000e0
-    csrw    0x9e4, a0
-    li      a0, 0x30000000
-    csrw    0x9f4, a0
-    li      a0, 0x300000c0
-    csrw    0x9e5, a0
-    li      a0, 0x30004000
-    csrw    0x9f5, a0
-    li      a0, 0x30000000
-    csrw    0x9dd, a0
-    li      a0, 0x30004000
-    csrw    0x9df, a0
-    li      a0, 0x800003e0
-    csrw    0x9e6, a0
-    li      a0, 0xc0000000
-    csrw    0x9f6, a0
-    li      a0, 0x7f
-    csrw    0x9c0, a0
-    li      a0, 0x103
-    csrs    0x7c0, a0
-    fence.i
-    li      a0, 0x103
-    csrc    0x7c0, a0
-    fence.i
-    li      a0, 0x139
-    csrs    0x7c0, a0
-    fence.i
-#else
     fence.i
     fence
-#endif
 
     .option push
     .option norelax
@@ -198,3 +274,5 @@ _start:
     j       .L_hang
 
     .size _start, . - _start
+
+#endif /* EN7523 */

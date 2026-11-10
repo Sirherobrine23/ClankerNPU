@@ -49,7 +49,7 @@ CFLAGS  := $(ARCH) -Os -ffunction-sections -fdata-sections \
            $(if $(filter 1,$(CLANKER)),-DUSE_CLANKER_DRIVER)
 ASFLAGS := $(ARCH) -D$(SOC) -D$(WIFI)
 LIBGCC  := $(shell $(CC) $(ARCH) -print-libgcc-file-name)
-LDFLAGS := -m elf32lriscv -T link.ld -nostdlib --gc-sections --relax \
+LDFLAGS := -m elf32lriscv -nostdlib --gc-sections --relax \
            --print-memory-usage
 
 ifeq ($(SOC),EN7523)
@@ -57,6 +57,7 @@ ifeq ($(SOC),EN7523)
 endif
 
 BUILD   := build/$(SOC)_$(WIFI)
+LDSCRIPT := $(BUILD)/link.ld
 OUTPUT  ?= firmwares
 ELF     := $(BUILD)/firmware.elf
 BIN     := $(OUTPUT)/$(call to_lower,$(SOC))$(if $(filter NOWIFI,$(WIFI)),,_$(call to_lower,$(WIFI)))_npu_rv32.bin
@@ -102,8 +103,11 @@ $(BUILD)/%.o: %.c npu_config.h npu_regs.h npu_types.h npu_internal.h \
 		 npu_wifi.h $(FLAGS) | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(ELF): $(OBJS) link.ld
-	$(LD) $(LDFLAGS) -Map=$(MAP) -o $@ $(OBJS) $(LIBGCC)
+$(LDSCRIPT): link.ld | $(BUILD)
+	$(CC) $(ARCH) -E -P -x c -D$(SOC) -o $@ $<
+
+$(ELF): $(OBJS) $(LDSCRIPT)
+	$(LD) $(LDFLAGS) -T $(LDSCRIPT) -Map=$(MAP) -o $@ $(OBJS) $(LIBGCC)
 
 $(BIN): $(ELF)
 	$(OBJCOPY) -O binary -j .text -j .rodata $< $@
