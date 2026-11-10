@@ -22,12 +22,22 @@ CLANKER ?= 0
 # git short hash in the boot version line; pin it to compare images
 GITREV ?= $(shell git describe --always --dirty --abbrev=7 2>/dev/null || echo nogit)
 
+NPU_VERSION_MAJOR  ?= 7
+NPU_VERSION_MINOR  ?= 13
+NPU_VERSION_REV    ?= 0
+
+to_lower = $(shell printf '%s' '$(1)' | tr '[:upper:]' '[:lower:]')
+
 ARCH    := -march=rv32imc_zicsr_zifencei -mabi=ilp32
 CFLAGS  := $(ARCH) -Os -ffunction-sections -fdata-sections \
            -fno-builtin -ffreestanding -nostdlib \
            -Wall -Wno-unused-function \
            -D$(SOC) -D$(WIFI) -DNPU_WIFI_NAME='"$(WIFI)"' \
-           -DNPU_GIT_REV='"$(GITREV)"' $(if $(filter 1,$(MAILTRACE)),-DNPU_MAIL_TRACE) \
+           -DNPU_GIT_REV='"$(GITREV)"' \
+           -DNPU_VERSION_MAJOR='$(NPU_VERSION_MAJOR)' \
+           -DNPU_VERSION_MINOR='$(NPU_VERSION_MINOR)' \
+           -DNPU_VERSION_PATCH='$(NPU_VERSION_REV)' \
+           $(if $(filter 1,$(MAILTRACE)),-DNPU_MAIL_TRACE) \
            $(if $(filter 0,$(NPUTX)),-DEAGLE_NO_TX_PUSH) \
            $(if $(filter 1,$(NPUDBG)),-DNPU_DATAPATH_DBG) \
            $(if $(filter 1,$(PROF)),-DNPU_PROFILE) \
@@ -38,9 +48,10 @@ LDFLAGS := -m elf32lriscv -T link.ld -nostdlib --gc-sections --relax \
            --print-memory-usage
 
 BUILD   := build/$(SOC)_$(WIFI)
+OUTPUT  ?= firmwares
 ELF     := $(BUILD)/firmware.elf
-BIN     := $(BUILD)/npu_rv32.bin
-DATA    := $(BUILD)/npu_data.bin
+BIN     := $(OUTPUT)/$(call to_lower,$(SOC))$(if $(filter NOWIFI,$(WIFI)),,_$(call to_lower,$(WIFI)))_npu_rv32.bin
+DATA    := $(OUTPUT)/$(call to_lower,$(SOC))$(if $(filter NOWIFI,$(WIFI)),,_$(call to_lower,$(WIFI)))_npu_data.bin
 MAP     := $(BUILD)/firmware.map
 DIS     := $(BUILD)/firmware.dis
 
@@ -64,8 +75,11 @@ FLAGS   := $(BUILD)/.flags
 
 all: $(BIN) $(DATA)
 
-$(BUILD):
+$(BUILD): $(OUTPUT)
 	mkdir -p $(BUILD)
+
+$(OUTPUT):
+	mkdir -p $(OUTPUT)
 
 # rebuild when the build flags change, not just the sources
 $(BUILD)/.flags: FORCE | $(BUILD)
@@ -93,6 +107,7 @@ disasm: $(ELF)
 
 clean:
 	rm -rf build/
+	rm -rf $(OUTPUT)
 
 # Build all 11 variants
 VARIANTS := AN7552_MT7916 AN7552_MT7991 AN7552_MT7993 \

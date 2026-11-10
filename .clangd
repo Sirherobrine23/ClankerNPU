@@ -1,0 +1,22 @@
+# Match the AN7552/NOWIFI firmware currently under development.
+# Change the SoC, WiFi and march flags together when editing another variant.
+CompileFlags:
+  Compiler: clang
+  Add:
+    - -xc
+    - --target=riscv32-unknown-elf
+    - -march=rv32im_zicsr_zifencei
+    - -mabi=ilp32
+    - -std=gnu11
+    - -ffreestanding
+    - -fno-builtin
+    - -nostdlib
+    - -DAN7552
+    - -DMT7915
+    - '-DNPU_WIFI_NAME="MT7915"'
+    - '-DNPU_GIT_REV="clangd"'
+
+    - -DNPU_VERSION_MAJOR=7
+    - -DNPU_VERSION_MINOR=13
+    - -DNPU_VERSION_PATCH=0
+    - -DNPU_VERSION_BUILD=0
