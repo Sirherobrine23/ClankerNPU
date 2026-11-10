@@ -24,8 +24,15 @@ PKG_FILE_DEPENDS:=$(CLANKERNPU_SOURCES)
 include $(INCLUDE_DIR)/package.mk
 
 clankernpu_lower = $(shell printf '%s' '$(1)' | tr '[:upper:]' '[:lower:]')
-clankernpu_prefix = $(patsubst %_nowifi,%,$(call clankernpu_lower,$(1)))
 clankernpu_package = airoha-$(subst _,-,$(call clankernpu_prefix,$(1)))-npu-firmware
+clankernpu_prefix = $(patsubst %_nowifi,%,$(call clankernpu_lower,$(1)))
+
+# OpenWrt invokes one build per VARIANT (e.g. EN7523_MT7915).
+# Derive the make arguments directly to avoid missing per-variant lookups.
+CLANKERNPU_SOC = $(word 1,$(subst _, ,$(BUILD_VARIANT)))
+CLANKERNPU_WIFI = $(word 2,$(subst _, ,$(BUILD_VARIANT)))
+
+FW_MAKE_FLAGS_DEFAULT:=MAILTRACE=0 NPUDBG=1 PROF=0 RXPROF=1 NPUTX=1 CLANKER=0
 
 define Package/clanker-npu/Default
   SECTION:=firmware
@@ -59,9 +66,9 @@ define Build/Compile
 		CROSS="$(PKG_TOOLCHAIN_CROSS)" \
 		OUTPUT="$(PKG_BUILD_DIR)/firmware" \
 		GITREV="$(CLANKERNPU_GITREV)" \
-		SOC="$(FW_SOC_$(BUILD_VARIANT))" \
-		WIFI="$(FW_WIFI_$(BUILD_VARIANT))" \
-		$(FW_MAKE_FLAGS_$(BUILD_VARIANT)) \
+		SOC="$(CLANKERNPU_SOC)" \
+		WIFI="$(CLANKERNPU_WIFI)" \
+		$(or $(FW_MAKE_FLAGS_$(BUILD_VARIANT)),$(FW_MAKE_FLAGS_DEFAULT)) \
 		all
 endef
 
@@ -69,8 +76,15 @@ endef
 define Firmware/Default
   FW_SOC:=
   FW_WIFI:=NOWIFI
-  FW_MAKE_FLAGS:=MAILTRACE=0 NPUDBG=0 PROF=0 CLANKER=0
+  FW_MAKE_FLAGS:=$(FW_MAKE_FLAGS_DEFAULT)
 endef
+
+define Firmware/en7523
+  FW_SOC:=EN7523
+  FW_WIFI:=NOWIFI MT7915 MT7916
+  FW_MAKE_FLAGS=MAILTRACE=0 NPUDBG=1 PROF=0 RXPROF=1 NPUTX=1 CLANKER=0
+endef
+FIRMWARES += en7523
 
 define Firmware/an7552
   FW_SOC:=AN7552
@@ -92,10 +106,6 @@ FIRMWARES += an7583
 
 # Generate an independent OpenWrt package for each SoC/Wi-Fi variant.
 define Firmware/Variant
-  FW_SOC_$(1)_$(2):=$(1)
-  FW_WIFI_$(1)_$(2):=$(2)
-  FW_MAKE_FLAGS_$(1)_$(2):=$(3)
-
   define Package/$(call clankernpu_package,$(1)_$(2))
     $$(call Package/clanker-npu/Default)
     TITLE:=ClankerNPU firmware for $(1) ($(2))
@@ -116,7 +126,10 @@ endef
 define Firmware/Build
   $(eval $(Firmware/Default))
   $(eval $(Firmware/$(1)))
-  $(foreach wifi,$(FW_WIFI),$(eval $(call Firmware/Variant,$(FW_SOC),$(wifi),$(FW_MAKE_FLAGS))))
+  $(foreach wifi,$(FW_WIFI), \
+    $(eval FW_MAKE_FLAGS_$(FW_SOC)_$(wifi):=$(FW_MAKE_FLAGS)) \
+    $(eval $(call Firmware/Variant,$(FW_SOC),$(wifi))) \
+  )
 endef
 
 $(foreach fw,$(FIRMWARES),$(call Firmware/Build,$(fw)))

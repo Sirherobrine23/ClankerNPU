@@ -5,9 +5,9 @@ OBJCOPY := $(CROSS)objcopy
 OBJDUMP := $(CROSS)objdump
 SIZE    := $(CROSS)size
 
-# SoC: AN7552, AN7581, AN7583
+# SoC: EN7523, AN7552, AN7581, AN7583
 SOC     ?= AN7583
-# WiFi: MT7916, MT7991, MT7992, MT7993, MT7996, NOWIFI
+# WiFi: MT7915, MT7916, MT7991, MT7992, MT7993, MT7996, NOWIFI
 WIFI    ?= MT7996
 # 1 logs every WiFi mailbox command, from inside the mailbox ISR
 MAILTRACE ?= 0
@@ -28,7 +28,12 @@ NPU_VERSION_REV    ?= 0
 
 to_lower = $(shell printf '%s' '$(1)' | tr '[:upper:]' '[:lower:]')
 
-ARCH    := -march=rv32imc_zicsr_zifencei -mabi=ilp32
+ifeq ($(SOC),EN7523)
+ARCH := -march=rv32im_zicsr_zifencei -mabi=ilp32
+else
+ARCH := -march=rv32imc_zicsr_zifencei -mabi=ilp32
+endif
+
 CFLAGS  := $(ARCH) -Os -ffunction-sections -fdata-sections \
            -fno-builtin -ffreestanding -nostdlib \
            -Wall -Wno-unused-function \
@@ -46,6 +51,10 @@ ASFLAGS := $(ARCH) -D$(SOC) -D$(WIFI)
 LIBGCC  := $(shell $(CC) $(ARCH) -print-libgcc-file-name)
 LDFLAGS := -m elf32lriscv -T link.ld -nostdlib --gc-sections --relax \
            --print-memory-usage
+
+ifeq ($(SOC),EN7523)
+  LDFLAGS += --defsym=NPU_LOCAL_DATA_BASE=0x1E900000
+endif
 
 BUILD   := build/$(SOC)_$(WIFI)
 OUTPUT  ?= firmwares
@@ -110,7 +119,8 @@ clean:
 	rm -rf $(OUTPUT)
 
 # Build all 11 variants
-VARIANTS := AN7552_MT7916 AN7552_MT7991 AN7552_MT7993 \
+VARIANTS := EN7523_MT7915 EN7523_MT7916 EN7523_NOWIFI \
+            AN7552_MT7916 AN7552_MT7991 AN7552_MT7993 \
             AN7581_MT7916 AN7581_MT7992 AN7581_MT7996 \
             AN7583_MT7916 AN7583_MT7992 AN7583_MT7993 \
             AN7583_MT7996 AN7583_NOWIFI

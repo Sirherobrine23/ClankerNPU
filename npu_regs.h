@@ -182,7 +182,10 @@
 #define CPU_TIMER_COUNTER(idx)  (0x1EC10908 + ((idx) << 3))
 
 /* PCIe bases per SoC */
-#if defined(AN7583)
+#if defined(EN7523)
+#define PCIE0_MAC_BASE          0x1FA90000 /* PCIe window block */
+#define PCIE1_MAC_BASE          0x1FA90000
+#elif defined(AN7583)
 #define PCIE0_MAC_BASE          0x1FC20000
 #define PCIE1_MAC_BASE          0x1FA92000
 #elif defined(AN7552)
@@ -231,15 +234,25 @@
 #define NPU_BRIDGE_DBG_BASE     0x1EC12290
 
 /* NPU SRAM (seen from NPU side) */
+#ifdef EN7523
+/* EN7523 vendor code addresses its NPU-local data without the +0x20000000 alias. */
+#define NPU_SRAM_BASE           0x1E900000
+#else
 #define NPU_SRAM_BASE           0x3E900000
+#endif
 #define NPU_SRAM_SIZE_64K       0x10000
 
 /* DRAM image base */
 #define DRAM_IMAGE_BASE         0x84000000
 
 /* SRAM alias: host physical + 0x20000000 */
+#ifdef EN7523
+#define HOST_TO_NPU_SRAM(x)    (x)
+#define NPU_TO_HOST_SRAM(x)    (x)
+#else
 #define HOST_TO_NPU_SRAM(x)    ((x) + 0x20000000)
 #define NPU_TO_HOST_SRAM(x)    ((x) - 0x20000000)
+#endif
 
 /* DMA address mask (host physical → NPU-visible) */
 #define NPU_ADDR_MASK           0x40000000
@@ -248,7 +261,9 @@
 #define STACK_SIZE              0x4000
 
 /* Core counts */
-#if defined(AN7552)
+#if defined(EN7523)
+#define MAX_CORE_NUM            4
+#elif defined(AN7552)
 #define MAX_CORE_NUM            2
 #elif defined(AN7583)
 #define MAX_CORE_NUM            6
@@ -256,23 +271,108 @@
 #define MAX_CORE_NUM            8
 #endif
 
+/* Operation modes */
+enum func_type {
+	NPU_OP_SET = 1,
+	NPU_OP_SET_NO_WAIT,
+	NPU_OP_GET,
+	NPU_OP_GET_NO_WAIT,
+};
+
 /* Mailbox function IDs */
-#define MFUNC_WIFI              0
-#define MFUNC_TUNNEL            1
-#define MFUNC_NOTIFY            2
-#define MFUNC_DBA               3
-#define MFUNC_TR471             4
-#define MFUNC_HWNAT             5
-#define MAX_MBOX_FUNC           8
+enum mailbox_callbacks {
+	NPU_FUNC_WIFI,
+	NPU_FUNC_TUNNEL,
+	NPU_FUNC_NOTIFY,
+	NPU_FUNC_DBA,
+	NPU_FUNC_TR471,
+	NPU_FUNC_PPE,
+
+	NPU_FUNC_MAX = 8
+};
 
 /* WiFi interfaces */
-#define INTERFACE_2G            0
-#define INTERFACE_5G            1
+enum airoha_npu_bands {
+	AIROHA_WLAN_BAND_2G = 0,
+	AIROHA_WLAN_BAND_5G,
+	AIROHA_WLAN_BAND_6G,
+};
 
 /* WiFi driver models */
-#define DRIVER_MODEL_MT7915A    0
-#define DRIVER_MODEL_MT7915D    1
-#define DRIVER_MODEL_MT7916D    2
+enum airoha_npu_wlan_chip {
+	AIROHA_NPU_WLAN_NONE = 0,
+	AIROHA_NPU_WLAN_MT7915,
+	AIROHA_NPU_WLAN_MT7915_DBDC,
+	AIROHA_NPU_WLAN_MT7916,
+	AIROHA_NPU_WLAN_MT7990,
+	AIROHA_NPU_WLAN_MT7992,
+	AIROHA_NPU_WLAN_MT7996,
+};
+
+/* Wire IDs match Linux include/linux/soc/airoha/airoha_offload.h. */
+enum airoha_npu_wlan_set_cmd {
+	WLAN_FUNC_SET_WAIT_PCIE_ADDR,
+	WLAN_FUNC_SET_WAIT_DESC,
+	WLAN_FUNC_SET_WAIT_NPU_INIT_DONE,
+	WLAN_FUNC_SET_WAIT_TRAN_TO_CPU,
+	WLAN_FUNC_SET_WAIT_BA_WIN_SIZE,
+	WLAN_FUNC_SET_WAIT_DRIVER_MODEL,
+	WLAN_FUNC_SET_WAIT_DEL_STA,
+	WLAN_FUNC_SET_WAIT_DRAM_BA_NODE_ADDR,
+	WLAN_FUNC_SET_WAIT_PKT_BUF_ADDR,
+	WLAN_FUNC_SET_WAIT_IS_TEST_NOBA,
+	WLAN_FUNC_SET_WAIT_FLUSHONE_TIMEOUT,
+	WLAN_FUNC_SET_WAIT_FLUSHALL_TIMEOUT,
+	WLAN_FUNC_SET_WAIT_IS_FORCE_TO_CPU,
+	WLAN_FUNC_SET_WAIT_PCIE_STATE,
+	WLAN_FUNC_SET_WAIT_PCIE_PORT_TYPE,
+	WLAN_FUNC_SET_WAIT_ERROR_RETRY_TIMES,
+	WLAN_FUNC_SET_WAIT_BAR_INFO,
+	WLAN_FUNC_SET_WAIT_FAST_FLAG,
+	WLAN_FUNC_SET_WAIT_NPU_BAND0_ONCPU,
+	WLAN_FUNC_SET_WAIT_TX_RING_PCIE_ADDR,
+	WLAN_FUNC_SET_WAIT_TX_DESC_HW_BASE,
+	WLAN_FUNC_SET_WAIT_TX_BUF_SPACE_HW_BASE,
+	WLAN_FUNC_SET_WAIT_RX_RING_FOR_TXDONE_HW_BASE,
+	WLAN_FUNC_SET_WAIT_TX_PKT_BUF_ADDR,
+	WLAN_FUNC_SET_WAIT_INODE_TXRX_REG_ADDR,
+	WLAN_FUNC_SET_WAIT_INODE_DEBUG_FLAG,
+	WLAN_FUNC_SET_WAIT_INODE_HW_CFG_INFO,
+	WLAN_FUNC_SET_WAIT_INODE_STOP_ACTION,
+	WLAN_FUNC_SET_WAIT_INODE_PCIE_SWAP,
+	WLAN_FUNC_SET_WAIT_RATELIMIT_CTRL,
+	WLAN_FUNC_SET_WAIT_HWNAT_INIT,
+	WLAN_FUNC_SET_WAIT_ARHT_CHIP_INFO,
+	WLAN_FUNC_SET_WAIT_TX_BUF_CHECK_ADDR,
+	WLAN_FUNC_SET_WAIT_TOKEN_ID_SIZE,
+
+	WLAN_FUNC_SET_WAIT_MAX,
+};
+
+enum airoha_npu_wlan_get_cmd {
+	WLAN_FUNC_GET_WAIT_NPU_INFO,
+	WLAN_FUNC_GET_WAIT_LAST_RATE,
+	WLAN_FUNC_GET_WAIT_COUNTER,
+	WLAN_FUNC_GET_WAIT_DBG_COUNTER,
+	WLAN_FUNC_GET_WAIT_RXDESC_BASE,
+	WLAN_FUNC_GET_WAIT_WCID_DBG_COUNTER,
+	WLAN_FUNC_GET_WAIT_DMA_ADDR,
+	WLAN_FUNC_GET_WAIT_RING_SIZE,
+	WLAN_FUNC_GET_WAIT_NPU_SUPPORT_MAP,
+	WLAN_FUNC_GET_WAIT_MDC_LOCK_ADDRESS,
+	WLAN_FUNC_GET_WAIT_NPU_VERSION,
+
+	WLAN_FUNC_GET_WAIT_MAX,
+};
+
+/* Mailbox response status in CTRL3 bits 4:2, shared with the host driver. */
+enum npu_mbox_status {
+	NPU_MBOX_ERROR = 0,
+	NPU_MBOX_SUCCESS,
+	NPU_MBOX_EINVAL,
+	NPU_MBOX_EOPNOTSUPP,
+	NPU_MBOX_ENODEV,
+};
 
 /* Init complete sentinel */
 #define INIT_COMPLETE           0xCCCCCCCC

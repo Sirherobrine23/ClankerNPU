@@ -39,6 +39,10 @@ static void wifi_rxd_set_buf(u32 desc, u32 buf_id)
 	*(u16 *)(desc + 6) = (*(u16 *)(desc + 6) & 0x4000) | 0xDAC;
 }
 
+/* The vendor allocates 0x6000 bytes per ring (1536 x 16 B).
+ * Reject invalid host requests rather than overrun the buffer-ID table. */
+#define EN7523_KITE_RXD_MAX 1536u
+
 /* 5G rx ring */
 static int wifi_init_rxd_5g(u32 ring_size, u32 band)
 {
@@ -48,8 +52,12 @@ static int wifi_init_rxd_5g(u32 ring_size, u32 band)
 	npu_printf("[NPU] Enter %s, band_idx=%d, rx_ring_size=%lu\n",
 		   "npu_npu_init_rxd_5G", band, ring_size);
 
-	if (ring_size - 1 > 0x5FF)
-		npu_printf("ERROR! rx_ring_size = %lu \n", ring_size);
+	if (!ring_size || ring_size > EN7523_KITE_RXD_MAX ||
+	    !rxd_base_5g || (rxd_base_5g & 15u)) {
+		npu_printf("ERROR! 5G RXD size=%lu base=%x (max=1536)\n",
+			   ring_size, rxd_base_5g);
+		return 1;
+	}
 
 	if (rxd_5g_init_done != 0) {
 		npu_printf("5G init second: do np_skb free\n");
@@ -85,8 +93,12 @@ static int wifi_init_rxd_2g(u32 ring_size, u32 band)
 	npu_printf("[NPU] Enter(2.4G) %s, band_idx=%d, rx_ring_size=%lu\n",
 		   "npu_npu_init_rxd", band, ring_size);
 
-	if (ring_size - 1 > 0x5FF)
-		npu_printf("ERROR! rx_ring_size = %lu\n", ring_size);
+	if (!ring_size || ring_size > EN7523_KITE_RXD_MAX ||
+	    !rxd_base_2g || (rxd_base_2g & 15u) || !rxd_2g_bufid_base) {
+		npu_printf("ERROR! 2G RXD size=%lu base=%x ids=%x (max=1536)\n",
+			   ring_size, rxd_base_2g, rxd_2g_bufid_base);
+		return 1;
+	}
 
 	tbl = (u16 *)rxd_2g_bufid_base;
 	if (tbl != NULL && rxd_2g_init_done != 0) {
@@ -231,7 +243,7 @@ void wifi_pcie_desc_alloc(void)
 #endif
 
 /* the window beside PCIE0_WIN: MAC space on AN758x, SCU on AN7552 */
-#ifdef AN7552
+#if defined(AN7552) || defined(EN7523)
 #define KITE_WIN1_BASE		PCIE1_WIN_BASE
 #define KITE_WIN1_END		PCIE1_WIN_END
 #else
@@ -281,11 +293,19 @@ static u8 wifi_get_band_cap(u8 model)
 	}
 
 	/* model 0: only these chip 12 packages */
-	if (chip_rev == 12 && (variant == 0 || variant == 1 ||
-			       variant == 11 || variant == 3 ||
-			       variant == 4 || variant == 12)) {
-		npu_printf("Chip id(%x) support NPU Wifi ffload\n", variant);
-		return 1;
+	if (chip_rev == 12) {
+		switch (variant) {
+			case 0:
+			case 1:
+			case 3:
+			case 4:
+			case 11:
+			case 12:
+				npu_printf("Chip id(%x) support NPU Wifi ffload\n", variant);
+				return 1;
+			default:
+				break;
+		}
 	}
 	npu_printf("Chip id(%x) does not support NPU Wifi ffload!!!\n",
 		   variant);

@@ -1,7 +1,8 @@
 /*
  * AN75XX NPU firmware - SRAM buffer manager
  *
- * A bump allocator over the SRAM at 0x3E800000, keyed by address type.
+ * A bump allocator over NPU SRAM (0x1E800000 on EN7523,
+ * 0x3E800000 on AN75xx), keyed by address type.
  * tdma_init() zeroes the SRAM and restarts the allocator, so nothing may
  * claim a block before that call.
  */
@@ -16,8 +17,16 @@
  * Size and max alloc entries vary by SoC.
  * ================================================================ */
 
+#ifdef EN7523
+#define SRAM_BASE         0x1E800000
+#else
 #define SRAM_BASE         0x3E800000
-#if defined(AN7552)
+#endif
+#if defined(EN7523)
+/* EN7523 vendor startup maps 0x1E800000..0x1E860000. */
+#define SRAM_SIZE         0x60000
+#define SRAM_MAX_ENTRIES  100
+#elif defined(AN7552)
 #define SRAM_SIZE         0x40000
 #define SRAM_MAX_ENTRIES  50
 #elif defined(AN7581)
@@ -53,7 +62,7 @@ static u32 sram_buf_alloc_impl(u16 addr_type, u32 size_class)
 
 	hw_mutex_lock(sram_buf_mutex);
 
-	if (sram_alloc_offset >= SRAM_SIZE && sram_alloc_count >= SRAM_MAX_ENTRIES) {
+	if (sram_alloc_offset >= SRAM_SIZE || sram_alloc_count >= SRAM_MAX_ENTRIES) {
 		hw_mutex_unlock(sram_buf_mutex);
 		npu_printf("sram is over the max!!current para:AddrType=%d,idx=%d,tmp_restore_index=%d\n",
 			   addr_type, sram_alloc_offset, sram_alloc_count);
@@ -90,6 +99,15 @@ static u32 sram_buf_alloc_impl(u16 addr_type, u32 size_class)
 		}
 	} else {
 		base = (u8 *)SRAM_BASE;
+	}
+
+	/* A block must fit in full; checking its start alone misses overrun. */
+	if ((u32)base - SRAM_BASE > SRAM_SIZE ||
+	    size_class > SRAM_SIZE - ((u32)base - SRAM_BASE)) {
+		npu_printf("sram allocation beyond end: type=%d size=%x addr=%x\n",
+			   addr_type, size_class, (u32)base);
+		hw_mutex_unlock(sram_buf_mutex);
+		return SRAM_ERROR_ADDR;
 	}
 
 	/* record entry */
@@ -136,7 +154,15 @@ static const struct sram_size_ent sram_size_lo[] = {
 	{  21, 0x06400 },
 };
 
-#if defined(AN7581)
+#if defined(EN7523)
+/* Four-hart EN7523 has a 384-KiB window; the AN7581 64-KiB TDMA
+ * rings would over-allocate it. Use the legacy 16-KiB TX/BME rings.
+ * The exact high-type layout still needs confirmation on hardware. */
+static const struct sram_size_ent sram_size_hi[] = {
+	{ 138, 0x02BC0 }, { 129, 0x10FFF }, { 132, 0x04000 },
+	{ 134, 0x01000 }, { 137, 0x00004 },
+};
+#elif defined(AN7581)
 static const struct sram_size_ent sram_size_hi[] = {
 	{ 138, 0x02BC0 }, { 129, 0x13FFF }, { 132, 0x11000 }, { 133, 0x01080 },
 	{ 130, 0x00004 }, { 137, 0x00004 },

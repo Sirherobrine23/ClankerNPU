@@ -33,21 +33,39 @@
 
 /*
  * Build-time variant selection.
- * Define exactly one SoC: AN7552, AN7581, AN7583
- * Define exactly one WiFi chip (or NOWIFI): MT7916, MT7991, MT7992, MT7993, MT7996, NOWIFI
+ * Define exactly one SoC: EN7523, AN7552, AN7581, AN7583
+ * Define exactly one WiFi chip (or NOWIFI): MT7915, MT7916, MT7991, MT7992, MT7993, MT7996, NOWIFI
  *
  * SoC → core count:
+ *   EN7523 → 4 cores, 4 timers (vendor EN7523 images)
  *   AN7552 → 2 cores
  *   AN7581 → 8 cores
  *   AN7583 → 6 cores
  *
  * WiFi chip → driver path:
- *   MT7916, MT7996              → kite (TDMA RX path, WiFi chip name table)
+ *   MT7915, MT7916, MT7996      → kite (TDMA RX path, WiFi chip name table)
  *   MT7991, MT7992, MT7993      → eagle (RRO, MSDU page ring, ind cmd ring)
  *   NOWIFI                      → no WiFi offload
  */
 
-#if defined(AN7552)
+/* XX230v vendor boot, MT7915D_NPU_V1.001.testv2 (2024 SDK):
+ * NPU core=333 MHz, timer input=125 MHz. They are independent clocks.
+ * Override for a board with a different clock tree; these are not universal
+ * across every EN752x clock grade. */
+#ifdef EN7523
+#ifndef EN7523_CORE_CLK_MHZ
+#define EN7523_CORE_CLK_MHZ 333u
+#endif
+#ifndef EN7523_TIMER_CLK_MHZ
+#define EN7523_TIMER_CLK_MHZ 125u
+#endif
+#endif
+
+#if defined(EN7523)
+#define MAX_CORE_NUM    4
+#define NPU_TIMER_NUM   4
+#define AN75XX
+#elif defined(AN7552)
 #define MAX_CORE_NUM    2
 #define NPU_TIMER_NUM   8
 #define AN75XX
@@ -62,10 +80,10 @@
 #define AN75XX
 #define AN758X
 #else
-#error "Define one SoC: AN7552, AN7581, or AN7583"
+#error "Define one SoC: EN7523, AN7552, AN7581, or AN7583"
 #endif
 
-#if defined(MT7916) || defined(MT7996)
+#if defined(MT7915) || defined(MT7916) || defined(MT7996)
 #define WIFI_KITE
 #define HAS_WIFI
 #elif defined(MT7991) || defined(MT7992) || defined(MT7993)
@@ -74,7 +92,7 @@
 #elif defined(NOWIFI)
 /* no WiFi offload */
 #else
-#error "Define one WiFi chip: MT7916, MT7991, MT7992, MT7993, MT7996, or NOWIFI"
+#error "Define one WiFi chip: MT7915, MT7916, MT7991, MT7992, MT7993, MT7996, or NOWIFI"
 #endif
 
 #if defined(AN7583) && !defined(NOWIFI)
@@ -103,7 +121,7 @@
 
 /* Per-packet functions in one .text.hot block, small helpers forced
  * inline. Hart 1's rx path: AN7552 kite, AN7583 eagle. */
-#if (defined(AN7552) && defined(WIFI_KITE)) || \
+#if ((defined(AN7552) || defined(EN7523)) && defined(WIFI_KITE)) || \
     (defined(AN7583) && defined(WIFI_EAGLE))
 #define HAS_HOT_TEXT
 #endif

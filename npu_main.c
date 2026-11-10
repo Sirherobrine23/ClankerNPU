@@ -236,8 +236,8 @@ static void __attribute__((noinline)) core0_main(void)
 		npu_printf("is_wifi_linkup_disable_npu_tunnel = %d\n", 1);
 #endif
 	core0_wifi_init_wrapper();
-#ifndef AN7552
-	/* AN7552 has no debug counter ISR */
+#if !defined(AN7552) && !defined(EN7523)
+	/* EN7523 and AN7552 do not use the AN758x debug-counter ISR. */
 	plic_register_isr(59, dbg_cnt_isr);
 #endif
 
@@ -263,8 +263,10 @@ static void __attribute__((noinline)) core1_main(void)
 }
 
 #if MAX_CORE_NUM > 2
+#ifndef EN7523
 static s32 chip_idx = -1;
 static void (*port_off_hooks[6])(void);
+#endif
 
 static void __attribute__((noinline)) core2_main(void)
 {
@@ -278,6 +280,7 @@ static void __attribute__((noinline)) core2_main(void)
 
 static void __attribute__((noinline)) core3_main(void)
 {
+#ifndef EN7523
 	s32 i;
 
 	/* find the package, then switch off the ports it does not have */
@@ -302,6 +305,7 @@ found:
 		if (port_off_hooks[i])
 			port_off_hooks[i]();
 
+#endif /* !EN7523: package-specific USB/PCIe power gating is not validated */
 	core3_wifi_init_wrapper();
 }
 

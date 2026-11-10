@@ -12,6 +12,8 @@ typedef signed long long s64;
 
 #define NULL ((void *)0)
 
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+
 typedef void (*isr_fn_t)(int src);
 typedef int (*mbox_handler_t)(u32 base_ptr, u32 max_cnt);
 

@@ -1,4 +1,4 @@
-# Match the AN7552/NOWIFI firmware currently under development.
+# Match the EN7523/NOWIFI firmware currently under development.
 # Change the SoC, WiFi and march flags together when editing another variant.
 CompileFlags:
   Compiler: clang
@@ -11,9 +11,10 @@ CompileFlags:
     - -ffreestanding
     - -fno-builtin
     - -nostdlib
-    - -DAN7552
+    - -DEN7523
     - -DMT7915
-    - '-DNPU_WIFI_NAME="MT7915"'
+    # - '-DNPU_WIFI_NAME="MT7915"'
+    - '-DNPU_WIFI_NAME="MT7916"'
     - '-DNPU_GIT_REV="clangd"'
 
     - -DNPU_VERSION_MAJOR=7

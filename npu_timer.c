@@ -65,6 +65,17 @@ void timer_isr(int src)
 	}
 }
 
+/* EN7523 vendor prints 333 MHz for the RV32 core and 125 MHz for the
+ * timer. In particular, CPU/4 (83 MHz) is not the timer input clock. */
+static u32 timer_input_clock_mhz(void)
+{
+#ifdef EN7523
+	return sim_mode_flag ? 25u : EN7523_TIMER_CLK_MHZ;
+#else
+	return cpu_clock_div4();
+#endif
+}
+
 void timer_init(int timer, int enable, int period)
 {
 	u32 base = (timer >= 8) ? NPU_TIMER1_BASE : NPU_TIMER0_BASE;
@@ -77,7 +88,7 @@ void timer_init(int timer, int enable, int period)
 			   "timer_init", timer, NPU_TIMER_NUM);
 		return;
 	}
-#if !defined(AN7581)
+#if !defined(AN7581) && !defined(EN7523)
 	if ((u32)(timer - 3) <= 3)
 		pair = timer_pair_bit[timer - 3];
 #endif
@@ -91,12 +102,16 @@ void timer_init(int timer, int enable, int period)
 	npu_printf("%s: Timer clk is running at %d Mhz\n", "timer_init", 50);
 	REG32(timer_reload_reg[timer]) = 50000 * (u32)period;
 #else
-	timer_clk_mhz = cpu_clock_div4();
+	timer_clk_mhz = timer_input_clock_mhz();
 	npu_printf("%s: Timer clk is running at %d Mhz\n", "timer_init",
 		   timer_clk_mhz);
-#if defined(AN7581)
+#if defined(AN7581) || defined(EN7523)
 	REG32(timer_reload_reg[timer]) =
-		(u32)period * cpu_clock_div4() * 1000 / 100;
+		(u32)period * timer_input_clock_mhz() * 1000 / 100;
+#ifdef EN7523
+	/* The EN7523 has no dedicated AN7581 timer worker. */
+	plic_register_isr(timer_irq_map[timer], timer_isr);
+#endif
 #else
 	REG32(timer_reload_reg[timer]) = 1000 * (u32)period * cpu_clock_div4();
 	/* AN7552 has no timer core: the tick runs on hart 0 */
@@ -130,12 +145,20 @@ void delay_1ms(u32 ms)
 
 u32 cpu_clock_get(void)
 {
+#ifndef EN7523
 	static const u32 pll_freq[] = PLL_FREQ_TABLE;
+#endif
 
 	if (sim_mode_flag != 0)
 		return 100;
+#ifdef EN7523
+	/* The AN758x PLL table has no 333 MHz value at any valid divider;
+	 * the XX230v vendor instead reports 333000000 Hz. */
+	return EN7523_CORE_CLK_MHZ;
+#else
 	return pll_freq[(REG32(PLL_CFG_REG) >> PLL_SEL_SHIFT) & 3] /
 	       ((REG32(PLL_CFG_REG) & 7) + 1);
+#endif
 }
 
 static u32 cpu_clock_div2(void)

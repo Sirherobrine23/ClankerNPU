@@ -3,7 +3,7 @@
  *
  * Memory layout:
  *   .text + .rodata  → DRAM at 0x84000000  (becomes npu_rv32.bin)
- *   .data            → NPU SRAM at 0x3E900000  (becomes npu_data.bin)
+ *   .data            → local SRAM at 0x1E900000 on EN7523, 0x3E900000 otherwise  (becomes npu_data.bin)
  *   .bss             → NPU SRAM after .data (zeroed by crt0, not in any file)
  *   stacks           → DRAM after .text (not in any file, 16KB per hart)
  */
@@ -14,7 +14,7 @@ ENTRY(_start)
 MEMORY
 {
     DRAM (rwx)  : ORIGIN = 0x84000000, LENGTH = 2M
-    SRAM (rw)   : ORIGIN = 0x3E900000, LENGTH = 64K
+    SRAM (rw)   : ORIGIN = DEFINED(NPU_LOCAL_DATA_BASE) ? NPU_LOCAL_DATA_BASE : 0x3E900000, LENGTH = 64K
 }
 
 SECTIONS

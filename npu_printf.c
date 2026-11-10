@@ -306,10 +306,22 @@ int npu_printf(const char *fmt, ...)
 	if (!npu_printf_prefix) {
 		npu_printf_prefix = 1;
 	} else {
+		// [    6.817697]
 		uart_putc('[');
+		uart_putc(' ');
+		uart_putc(' ');
+		uart_putc('N');
+		uart_putc('P');
+		uart_putc('U');
+		uart_putc(' ');
 		uart_putc('C');
+		uart_putc('O');
+		uart_putc('R');
+		uart_putc('E');
+		uart_putc(' ');
 		uart_putc(get_core_char());
 		uart_putc(']');
+		uart_putc(' ');
 	}
 
 	/* output with LF→CRLF conversion */
@@ -323,6 +335,7 @@ int npu_printf(const char *fmt, ...)
 
 void boot_uart_init(void)
 {
+#ifndef EN7523
 	REG32(BOOT_UART_FCR) = 15;
 	REG32(BOOT_UART_MCR) = 0;
 	REG32(BOOT_UART_SCR) = 0;
@@ -332,11 +345,15 @@ void boot_uart_init(void)
 	REG32(BOOT_UART_DLL) = 1;
 	REG32(BOOT_UART_DLM) = 0;
 	REG32(BOOT_UART_LCR) = 3;		/* 8N1 */
+#endif
 
+	/* EN7523 prints through the SoC UART already configured by the host. */
 	printf_mutex_desc[0] = 15;
 	printf_mutex_desc[1] = 0;
+#ifndef EN7523
 	boot_printf("%s done via base:0x%x\n\n\n", "npu_uart_init",
 		    BOOT_UART_BASE);
+#endif
 }
 
 /* boot printf (uses boot UART at 0x1EC10000) */
@@ -352,15 +369,29 @@ int boot_printf(const char *fmt, ...)
 	len = npu_vsprintf(printf_buf, fmt, (u32 *)ap);
 	__builtin_va_end(ap);
 
+	char corePrefix[] = {
+		'[',
+		' ',
+		' ',
+		'N',
+		'P',
+		'U',
+		' ',
+		'C',
+		'O',
+		'R',
+		'E',
+		' ',
+		get_core_char(),
+		']',
+		' ',
+	};
+
 	/* output core prefix */
-	while (!(REG32(BOOT_UART_STATUS) & UART_TX_READY_BIT)) ;
-	REG32(BOOT_UART_TX) = '[';
-	while (!(REG32(BOOT_UART_STATUS) & UART_TX_READY_BIT)) ;
-	REG32(BOOT_UART_TX) = 'C';
-	while (!(REG32(BOOT_UART_STATUS) & UART_TX_READY_BIT)) ;
-	REG32(BOOT_UART_TX) = get_core_char();
-	while (!(REG32(BOOT_UART_STATUS) & UART_TX_READY_BIT)) ;
-	REG32(BOOT_UART_TX) = ']';
+	for (int i; i < ARRAY_SIZE(corePrefix); i++) {
+		while (!(REG32(BOOT_UART_STATUS) & UART_TX_READY_BIT));
+		REG32(BOOT_UART_TX) = corePrefix[i];
+	}
 
 	/* output buffer */
 	p = printf_buf;

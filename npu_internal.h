@@ -277,6 +277,7 @@ void tdma_tx_init(void);
 #endif
 void core0_wifi_init_wrapper(void);
 void core3_wifi_init_wrapper(void);
+int wifi_mail_get_npu_version(u32 *msg);
 #ifdef HAS_WIFI
 void buf_mgr_init(void);
 #if defined(WIFI_KITE) && !defined(HAS_BME)
@@ -761,7 +762,9 @@ extern volatile u32 kite_test_active;
  * ================================================================ */
 
 /* AN7552 cluster local SRAM is 16 KB: the block takes its last 4 KB */
-#ifdef AN7552
+#if defined(EN7523)
+#define NDBG_BASE	0x1E906800
+#elif defined(AN7552)
 #define NDBG_BASE	0x3E903000
 #else
 #define NDBG_BASE	0x3E906800
