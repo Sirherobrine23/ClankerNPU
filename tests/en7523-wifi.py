@@ -57,7 +57,12 @@ def packet(band, blob, last=True):
             break
     else:
         raise AssertionError('WiFi descriptor was not returned')
-    assert read(radio_regs[band]+8)==index
+    for _ in range(60000):
+        if read(radio_regs[band]+8)==index:
+            break
+        tick(1)
+    else:
+        raise AssertionError('WiFi batched consumer index was not published')
     assert read(desc+4)==3500<<16
     return desc
 

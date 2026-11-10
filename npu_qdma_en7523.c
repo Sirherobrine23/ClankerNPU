@@ -41,6 +41,25 @@ static u32 ppe_last_data, ppe_last_info;
 u32 ppe_cpu_reasons[32];
 static u32 ppe_logged_reasons[32];
 
+static const char *const en7523_rx_fallback_name[] = {
+	[EN7523_RX_FALLBACK_DECODE] = "decode",
+	[EN7523_RX_FALLBACK_BAD] = "bad-rxd",
+	[EN7523_RX_FALLBACK_CRYPTO] = "protected",
+	[EN7523_RX_FALLBACK_NO_SESSION] = "no-session",
+	[EN7523_RX_FALLBACK_NOT_REORDERED] = "no-ba-reorder",
+	[EN7523_RX_FALLBACK_DIRECT_DISABLED] = "direct-disabled",
+	[EN7523_RX_FALLBACK_CHAINED] = "chained",
+	[EN7523_RX_FALLBACK_FRAME_FORMAT] = "frame-format",
+	[EN7523_RX_FALLBACK_ETH_FORMAT] = "ethernet",
+	[EN7523_RX_FALLBACK_IPV4_FORMAT] = "ipv4",
+	[EN7523_RX_FALLBACK_L4_PROTO] = "l4-proto",
+	[EN7523_RX_FALLBACK_SOURCE] = "source-mac",
+	[EN7523_RX_FALLBACK_TRANSLATION] = "translation",
+	[EN7523_RX_FALLBACK_QDMA] = "qdma-admission",
+};
+
+static u32 en7523_rx_fallback_logged[2][EN7523_RX_FALLBACK_MAX];
+
 static const char *ppe_reason_name(u32 reason)
 {
 	switch (reason) {
@@ -147,6 +166,9 @@ int en7523_qdma_submit(u32 id, u32 addr, u32 len, u32 band,
 	struct en7523_ppe_packet *p;
 	u32 base = wifi_pkt_buf_addr + (id << 12);
 	u16 next, tail;
+#ifdef EN7523_RX_PROFILE
+	u32 stamp;
+#endif
 
 	/* The first TC flow setup publishes the PPE configuration over mailbox 5. */
 	if (!hwnat_ready || !qdma_ready || REG32(QDMA_TX_BASE) != tx_base ||
@@ -154,7 +176,13 @@ int en7523_qdma_submit(u32 id, u32 addr, u32 len, u32 band,
 	    id >= 5600 || len < 14 || len > 3500 || band > 1 || vif >= 16 ||
 	    addr < base || addr - base > 255 || addr - base + len > 4096)
 		return -1;
+#ifdef EN7523_RX_PROFILE
+	stamp = en7523_rx_prof_begin(band);
+#endif
 	hw_mutex_lock(qdma_mutex);
+#ifdef EN7523_RX_PROFILE
+	en7523_rx_prof_end(band, EN7523_PROF_QDMA_LOCK, stamp);
+#endif
 	if (REG32(QDMA_TX_CPU) != tx_tail) {
 		qdma_ready = 0;
 		hw_mutex_unlock(qdma_mutex);
@@ -165,6 +193,9 @@ int en7523_qdma_submit(u32 id, u32 addr, u32 len, u32 band,
 		hw_mutex_unlock(qdma_mutex);
 		return -1;
 	}
+#ifdef EN7523_RX_PROFILE
+	stamp = en7523_rx_prof_begin(band);
+#endif
 	tail = tx_tail;
 	next = free_ring[free_read];
 	free_read = (free_read + 1) & (EN7523_QDMA_COUNT - 1);
@@ -191,7 +222,14 @@ int en7523_qdma_submit(u32 id, u32 addr, u32 len, u32 band,
 	desc[1] = len;
 	qdma_fence();
 	tx_tail = next;
+#ifdef EN7523_RX_PROFILE
+	en7523_rx_prof_end(band, EN7523_PROF_QDMA_DESC, stamp);
+	stamp = en7523_rx_prof_begin(band);
+#endif
 	REG32(QDMA_TX_CPU) = next;
+#ifdef EN7523_RX_PROFILE
+	en7523_rx_prof_end(band, EN7523_PROF_QDMA_KICK, stamp);
+#endif
 	hw_mutex_unlock(qdma_mutex);
 	return 0;
 }
@@ -326,6 +364,72 @@ void en7523_ppe_rx_poll(u32 band)
 	}
 }
 
+#ifdef EN7523_RX_PROFILE
+static const char *const en7523_rx_prof_names[] = {
+	[EN7523_PROF_RX_DESC] = "rx-desc",
+	[EN7523_PROF_BUF_ALLOC] = "buf-alloc",
+	[EN7523_PROF_RX_PROCESS] = "rx-process",
+	[EN7523_PROF_RX_FIRST_DECODE] = "first-decode",
+	[EN7523_PROF_RX_MANAGED] = "rx-managed",
+	[EN7523_PROF_BA_CLASSIFY] = "ba-classify",
+	[EN7523_PROF_BA_FORWARD] = "ba-forward",
+	[EN7523_PROF_RX_RELEASE] = "rx-release",
+	[EN7523_PROF_RX_DECODE] = "decode",
+	[EN7523_PROF_QDMA_SUBMIT] = "qdma-submit",
+	[EN7523_PROF_QDMA_LOCK] = "qdma-lock",
+	[EN7523_PROF_QDMA_DESC] = "qdma-descriptor",
+	[EN7523_PROF_QDMA_KICK] = "qdma-kick",
+	[EN7523_PROF_PCIE_KICK] = "pcie-kick",
+	[EN7523_PROF_BA_SCAN] = "ba-scan",
+	[EN7523_PROF_HOST_FLUSH] = "host-flush",
+};
+
+static void en7523_rx_prof_dump(void)
+{
+	static u32 prev_samples[2][EN7523_PROF_STAGE_MAX];
+	static u32 prev_cycles[2][EN7523_PROF_STAGE_MAX];
+	static u32 prev_desc[2], prev_frames[2], prev_kicks[2];
+	static u32 prev_cache_hits[2];
+	u32 band, stage;
+
+	for (band = 0; band < 2; band++) {
+		u32 desc = en7523_rx_prof_desc[band];
+		u32 frames = en7523_rx_prof_frames[band];
+		u32 kicks = en7523_rx_prof_kicks[band];
+		u32 cache_hits = en7523_rx_cache_hits[band];
+		u32 dh = cache_hits - prev_cache_hits[band];
+		u32 dd = desc - prev_desc[band];
+		u32 df = frames - prev_frames[band];
+		u32 dk = kicks - prev_kicks[band];
+
+		prev_desc[band] = desc;
+		prev_frames[band] = frames;
+		prev_kicks[band] = kicks;
+		prev_cache_hits[band] = cache_hits;
+		if (!dd)
+			continue;
+		npu_printf("[RX PROF] band=%u desc=%u frames=%u kicks=%u batch_x10=%u cache_hits=%u\n",
+			   band, dd, df, dk,
+			   dk ? dd * 10 / dk : 0, dh);
+		for (stage = 0; stage < EN7523_PROF_STAGE_MAX; stage++) {
+			volatile struct en7523_rx_prof_stage_stats *s =
+				&en7523_rx_prof[band][stage];
+			u32 count = s->samples;
+			u32 cycles = s->cycles;
+			u32 n = count - prev_samples[band][stage];
+			u32 delta = cycles - prev_cycles[band][stage];
+
+			prev_samples[band][stage] = count;
+			prev_cycles[band][stage] = cycles;
+			if (n)
+				npu_printf("[RX PROF] band=%u stage=%s n=%u avg=%u max=%u\n",
+					   band, en7523_rx_prof_names[stage], n,
+					   delta / n, s->max_cycles);
+		}
+	}
+}
+#endif
+
 /* Hart 0 prints outside the RX, completion and interrupt paths. */
 void en7523_wifi_debug_poll(void)
 {
@@ -367,6 +471,21 @@ void en7523_wifi_debug_poll(void)
 	npu_printf("[PPE] returned=%u exceptions=%u pending=%u/%u invalid=%u host_drop=%u last=%x/%x\n",
 		   ppe_returned, ppe_exceptions, pending[0], pending[1],
 		   ppe_invalid, ppe_host_drops, ppe_last_data, ppe_last_info);
+	for (band = 0; band < 2; band++) {
+		for (i = 0; i < EN7523_RX_FALLBACK_MAX; i++) {
+			u32 total = en7523_rx_fallback[band][i];
+			u32 delta = total - en7523_rx_fallback_logged[band][i];
+
+			if (!delta)
+				continue;
+			npu_printf("[RX FALLBACK] band=%u cause=%s total=%u delta=%u\n",
+				   band, en7523_rx_fallback_name[i], total, delta);
+			en7523_rx_fallback_logged[band][i] = total;
+		}
+	}
+#ifdef EN7523_RX_PROFILE
+	en7523_rx_prof_dump();
+#endif
 	for (i = 0; i < 32; i++) {
 		u32 delta = reasons[i] - ppe_logged_reasons[i];
 

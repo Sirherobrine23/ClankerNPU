@@ -175,10 +175,20 @@ int en7523_wifi_set(u32 *msg)
 	case WLAN_FUNC_SET_WAIT_DESC:
 		return en7523_wifi_prepare(band, val);
 	case WLAN_FUNC_SET_WAIT_DRIVER_MODEL:
+#ifdef MT7916
+		if (val != AIROHA_NPU_WLAN_MT7916)
+			return NPU_MBOX_EOPNOTSUPP;
+#else
 		if (val != AIROHA_NPU_WLAN_MT7915A &&
 		    val != AIROHA_NPU_WLAN_MT7915D)
 			return NPU_MBOX_EOPNOTSUPP;
+#endif
+		/* Preserve the MT7915 DBDC flag; MT7916 uses its own model. */
+#ifdef MT7916
+		npu_set_driver_model(val);
+#else
 		npu_set_driver_model(val == AIROHA_NPU_WLAN_MT7915D);
+#endif
 		break;
 	case WLAN_FUNC_SET_WAIT_PKT_BUF_ADDR:
 		if (val < 0x80000000 ||
@@ -235,9 +245,24 @@ static int en7523_wifi_rx(u32 band)
 		(volatile u32 *)(en7523_wifi_ring[band] + idx * 16);
 	u32 ctrl = desc[1], buf, len, id, total;
 	s32 replacement;
+#ifdef EN7523_RX_PROFILE
+	u32 stamp, begin = 0;
+	int sampled = 0;
+#endif
 
 	if (!(ctrl & EN7523_RX_DONE))
 		return 0;
+#ifdef EN7523_RX_PROFILE
+	en7523_rx_prof_desc[band]++;
+	if (ctrl & EN7523_RX_LAST) {
+		en7523_rx_prof_frames[band]++;
+		sampled = !(en7523_rx_prof_frames[band] & 63);
+		if (sampled) {
+			en7523_rx_prof_active[band] = 1;
+			begin = (u32)csr_read(mcycle);
+		}
+	}
+#endif
 	en7523_wifi_fence();
 	buf = desc[0];
 	len = (ctrl >> 16) & 0x3fff;
@@ -249,7 +274,13 @@ static int en7523_wifi_rx(u32 band)
 			ctrl & EN7523_RX_LAST ? len : REG32(buf) & 0xffff;
 	}
 	total = en7523_wifi_total[band];
+#ifdef EN7523_RX_PROFILE
+	stamp = en7523_rx_prof_begin(band);
+#endif
 	replacement = buf_mgr_alloc();
+#ifdef EN7523_RX_PROFILE
+	en7523_rx_prof_end(band, EN7523_PROF_BUF_ALLOC, stamp);
+#endif
 	if (!len || len > EN7523_RX_BYTES || !total || total > 16383 ||
 	    id >= 5600 || replacement < 0 || en7523_wifi_part[band] >= 7 ||
 	    en7523_wifi_drop[band]) {
@@ -269,19 +300,30 @@ static int en7523_wifi_rx(u32 band)
 		en7523_chain_bytes[band] = len;
 		desc[0] = wifi_pkt_buf_addr + ((u32)replacement << 12);
 		if (ctrl & EN7523_RX_LAST) {
+#ifdef EN7523_RX_PROFILE
+			stamp = en7523_rx_prof_begin(band);
+#endif
 			en7523_rx_process(en7523_chain_first[band], total, band);
+#ifdef EN7523_RX_PROFILE
+			en7523_rx_prof_end(band, EN7523_PROF_RX_PROCESS, stamp);
+#endif
 			en7523_chain_first[band] = 0xffff;
 		}
 	}
 	desc[1] = EN7523_RX_BYTES << 16;
 	en7523_wifi_fence();
-	REG32(en7523_wifi_regs[band] + 8) = idx;
 	en7523_wifi_index[band] =
 		idx + 1 == EN7523_RX_DESCS ? 0 : idx + 1;
 	en7523_wifi_part[band] = ctrl & EN7523_RX_LAST ? 0 :
 		(en7523_wifi_part[band] < 8 ? en7523_wifi_part[band] + 1 : 8);
 	if (ctrl & EN7523_RX_LAST)
 		en7523_wifi_drop[band] = 0;
+#ifdef EN7523_RX_PROFILE
+	if (sampled) {
+		en7523_rx_prof_end(band, EN7523_PROF_RX_DESC, begin);
+		en7523_rx_prof_active[band] = 0;
+	}
+#endif
 	return 1;
 }
 
@@ -308,6 +350,10 @@ void en7523_wifi_discard(u32 band)
 void en7523_wifi_rx_loop(u32 band)
 {
 	u32 i;
+#ifdef EN7523_RX_PROFILE
+	u32 stamp;
+	int sample;
+#endif
 
 	npu_dbg_loop(NDBG_TAG('W', 'R', 'X', '0') + band);
 	while (1) {
@@ -327,8 +373,38 @@ void en7523_wifi_rx_loop(u32 band)
 				for (i = 0; i < EN7523_RX_BATCH; i++)
 					if (!en7523_wifi_rx(band))
 						break;
-				en7523_rx_poll(band);
-				hostadpt_rx_flush(band);
+				if (i) {
+					u32 idx = en7523_wifi_index[band];
+#ifdef EN7523_RX_PROFILE
+					en7523_rx_prof_kicks[band]++;
+					sample = !(en7523_rx_prof_kicks[band] & 63);
+					if (sample)
+						en7523_rx_prof_active[band] = 1;
+					stamp = en7523_rx_prof_begin(band);
+#endif
+					/* Refill descriptors before publishing the consumed index. */
+					en7523_wifi_fence();
+					REG32(en7523_wifi_regs[band] + 8) =
+						idx ? idx - 1 : EN7523_RX_DESCS - 1;
+#ifdef EN7523_RX_PROFILE
+					en7523_rx_prof_end(band, EN7523_PROF_PCIE_KICK, stamp);
+#endif
+				}
+#ifdef EN7523_RX_PROFILE
+				if (i && sample) {
+					stamp = en7523_rx_prof_begin(band);
+					en7523_rx_poll(band);
+					en7523_rx_prof_end(band, EN7523_PROF_BA_SCAN, stamp);
+					stamp = en7523_rx_prof_begin(band);
+					hostadpt_rx_flush(band);
+					en7523_rx_prof_end(band, EN7523_PROF_HOST_FLUSH, stamp);
+					en7523_rx_prof_active[band] = 0;
+				} else
+#endif
+				{
+					en7523_rx_poll(band);
+					hostadpt_rx_flush(band);
+				}
 			}
 		}
 		en7523_wifi_fence();

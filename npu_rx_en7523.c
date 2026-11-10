@@ -1,4 +1,4 @@
-/* EN7523 MT7915 open-network RX reordering and PPE handoff. */
+/* EN7523 MT7915 Kite RX transport, BA reordering and PPE handoff. */
 #include "npu_internal.h"
 #include "npu_wifi.h"
 
@@ -20,6 +20,25 @@ _Static_assert(sizeof(struct en7523_sta) * 2 * (EN7523_STA_MAX + 1) <= 0xc000,
 
 static struct en7523_sta *stations;
 static u32 *rx_chain;
+
+/* Each radio hart owns one frame context until en7523_rx_process() returns. */
+static struct en7523_rx_cache {
+	const struct en7523_frame *frame;
+	u32 id;
+	u32 len;
+} rx_cache[2];
+#ifdef EN7523_RX_PROFILE
+volatile u32 en7523_rx_cache_hits[2];
+#endif
+volatile u32 en7523_rx_fallback[2][EN7523_RX_FALLBACK_MAX];
+#ifdef EN7523_RX_PROFILE
+volatile struct en7523_rx_prof_stage_stats
+	en7523_rx_prof[2][EN7523_PROF_STAGE_MAX];
+volatile u32 en7523_rx_prof_active[2];
+volatile u32 en7523_rx_prof_desc[2];
+volatile u32 en7523_rx_prof_frames[2];
+volatile u32 en7523_rx_prof_kicks[2];
+#endif
 
 void en7523_rx_link(u32 id, u32 len, u32 next)
 {
@@ -127,10 +146,28 @@ static int rx_decode(u32 id, u32 len, struct en7523_frame *f)
 	return 0;
 }
 
+/* Only the active frame may reuse decoded metadata. BA may release older IDs. */
+static int rx_decode_current(u32 id, u32 len, u32 band,
+			     struct en7523_frame *f)
+{
+	const struct en7523_rx_cache *cache = &rx_cache[band];
+
+	if (cache->frame && cache->id == id && cache->len == len) {
+		npu_memcpy(f, cache->frame, sizeof(*f));
+#ifdef EN7523_RX_PROFILE
+		en7523_rx_cache_hits[band]++;
+#endif
+		return 0;
+	}
+	return rx_decode(id, len, f);
+}
+
 void en7523_rx_state_init(void)
 {
 	u32 base = sram_buf_alloc(44), i;
 
+	rx_cache[0].frame = 0;
+	rx_cache[1].frame = 0;
 	stations = (struct en7523_sta *)base;
 	rx_chain = (u32 *)sram_buf_alloc(45);
 	npu_memset(stations, 0, 2 * (EN7523_STA_MAX + 1) * sizeof(*stations));
@@ -155,13 +192,12 @@ int en7523_rx_managed(u32 id, u32 len, u32 band)
 	struct en7523_frame f;
 	struct en7523_sta *sta;
 
-	if (rx_decode(id, len, &f) || f.bad || f.node.tid >= 8 ||
+	if (rx_decode_current(id, len, band, &f) || f.bad ||
+	    f.node.tid >= 8 ||
 	    (f.fc & 0x0c) != 8)
 		return 0;
 	sta = &stations[band * (EN7523_STA_MAX + 1) + f.node.wcid];
-	/* Encrypted traffic keeps the host's key and replay validation. */
-	if (f.sec || (f.fc & 0x4000))
-		return 0;
+	/* Kite reorders protected frames; mac80211 still verifies replay. */
 	return !!(sta->enabled & (1 << f.node.tid));
 }
 
@@ -169,8 +205,8 @@ int en7523_rx_parse(u32 id, struct kite_node *node, u32 len, u32 band)
 {
 	struct en7523_frame f;
 
-	(void)band;
-	if (rx_decode(id, len, &f) || f.bad || f.fragment ||
+	if (rx_decode_current(id, len, band, &f) || f.bad ||
+	    f.fragment ||
 	    (f.fc & 0x0400) || (f.fc & 0xfc) != 0x88)
 		return -1;
 	npu_memcpy(node, &f.node, sizeof(*node));
@@ -188,8 +224,21 @@ int en7523_rx_release(u32 id, u32 len, u32 band, int reordered)
 	if (reordered & 4)
 		info |= EN7523_RX_BYPASS_BA;
 
-	if (rx_decode(id, len, &f))
-		goto host;
+	{
+		int decoded;
+#ifdef EN7523_RX_PROFILE
+		u32 stamp = en7523_rx_prof_begin(band);
+#endif
+
+		decoded = rx_decode_current(id, len, band, &f);
+#ifdef EN7523_RX_PROFILE
+		en7523_rx_prof_end(band, EN7523_PROF_RX_DECODE, stamp);
+#endif
+		if (decoded) {
+			en7523_rx_fallback[band][EN7523_RX_FALLBACK_DECODE]++;
+			goto host;
+		}
+	}
 	if (f.bad)
 		info = 0;
 	sta = &stations[band * (EN7523_STA_MAX + 1) + f.node.wcid];
@@ -199,30 +248,82 @@ int en7523_rx_release(u32 id, u32 len, u32 band, int reordered)
 		en7523_rx_free(id);
 		return 0;
 	}
-	addr = wifi_pkt_buf_addr + (id << 12) + f.node.hdr;
-	if (!en7523_wifi_direct[band] || !sta->enabled || !(reordered & 1) ||
-	    en7523_rx_next(id) != 0xffff ||
-	    !f.translated || f.bad || f.fragment || (f.fc & 0x0400) ||
-	    (f.fc & 0x0300) != 0x0100 || (f.fc & 0x0c) != 8 ||
-	    f.sec || (f.fc & 0x4000) || f.node.bss >= 16 ||
-	    (*(u8 *)addr & 1) || (rx_word(addr + 12) & 0xffff) != 8 ||
-	    len - f.node.hdr < 34 || (*(u8 *)(addr + 14) >> 4) != 4 ||
-	    (*(u8 *)(addr + 14) & 15) != 5 ||
-	    (rx_word(addr + 20) & 0xff3f) ||
-	    (*(u8 *)(addr + 23) != 6 && *(u8 *)(addr + 23) != 17))
+	/* Count protected frames before the BA gate to identify WPA fallback. */
+	if (f.sec || (f.fc & 0x4000)) {
+		en7523_rx_fallback[band][EN7523_RX_FALLBACK_CRYPTO]++;
 		goto host;
-	/* Header translation must retain the associated transmitter as SA. */
-	for (i = 0; i < 6; i++)
-		if (*(u8 *)(addr + 6 + i) != f.ta[i])
-			goto host;
-	/* Translation errors require the host's LLC/VLAN repair path. */
-	if (rx_word(wifi_pkt_buf_addr + (id << 12) + 8) & 0x02000000)
-		goto host;
-	if (!en7523_qdma_submit(id, addr, len - f.node.hdr, band,
-			       f.node.wcid, f.node.bss, sta->generation)) {
-		en7523_wifi_stats[band][0]++;
-		return 0;
 	}
+	if (f.bad) {
+		en7523_rx_fallback[band][EN7523_RX_FALLBACK_BAD]++;
+		goto host;
+	}
+	if (!sta->enabled) {
+		en7523_rx_fallback[band][EN7523_RX_FALLBACK_NO_SESSION]++;
+		goto host;
+	}
+	if (!(reordered & 1)) {
+		en7523_rx_fallback[band][EN7523_RX_FALLBACK_NOT_REORDERED]++;
+		goto host;
+	}
+	if (!en7523_wifi_direct[band]) {
+		en7523_rx_fallback[band][EN7523_RX_FALLBACK_DIRECT_DISABLED]++;
+		goto host;
+	}
+	if (en7523_rx_next(id) != 0xffff) {
+		en7523_rx_fallback[band][EN7523_RX_FALLBACK_CHAINED]++;
+		goto host;
+	}
+	if (!f.translated || f.fragment || (f.fc & 0x0400) ||
+	    (f.fc & 0x0300) != 0x0100 || (f.fc & 0x0c) != 8 ||
+	    f.node.bss >= 16) {
+		en7523_rx_fallback[band][EN7523_RX_FALLBACK_FRAME_FORMAT]++;
+		goto host;
+	}
+	addr = wifi_pkt_buf_addr + (id << 12) + f.node.hdr;
+	if ((*(u8 *)addr & 1) || (rx_word(addr + 12) & 0xffff) != 8 ||
+	    len - f.node.hdr < 34) {
+		en7523_rx_fallback[band][EN7523_RX_FALLBACK_ETH_FORMAT]++;
+		goto host;
+	}
+	if ((*(u8 *)(addr + 14) >> 4) != 4 ||
+	    (*(u8 *)(addr + 14) & 15) != 5 ||
+	    (rx_word(addr + 20) & 0xff3f)) {
+		en7523_rx_fallback[band][EN7523_RX_FALLBACK_IPV4_FORMAT]++;
+		goto host;
+	}
+	if (*(u8 *)(addr + 23) != 6 && *(u8 *)(addr + 23) != 17) {
+		en7523_rx_fallback[band][EN7523_RX_FALLBACK_L4_PROTO]++;
+		goto host;
+	}
+	/* Header translation must retain the associated transmitter as SA. */
+	for (i = 0; i < 6; i++) {
+		if (*(u8 *)(addr + 6 + i) != f.ta[i]) {
+			en7523_rx_fallback[band][EN7523_RX_FALLBACK_SOURCE]++;
+			goto host;
+		}
+	}
+	/* Translation errors require the host's LLC/VLAN repair path. */
+	if (rx_word(wifi_pkt_buf_addr + (id << 12) + 8) & 0x02000000) {
+		en7523_rx_fallback[band][EN7523_RX_FALLBACK_TRANSLATION]++;
+		goto host;
+	}
+	{
+		int err;
+#ifdef EN7523_RX_PROFILE
+		u32 stamp = en7523_rx_prof_begin(band);
+#endif
+
+		err = en7523_qdma_submit(id, addr, len - f.node.hdr, band,
+					 f.node.wcid, f.node.bss, sta->generation);
+#ifdef EN7523_RX_PROFILE
+		en7523_rx_prof_end(band, EN7523_PROF_QDMA_SUBMIT, stamp);
+#endif
+		if (!err) {
+			en7523_wifi_stats[band][0]++;
+			return 0;
+		}
+	}
+	en7523_rx_fallback[band][EN7523_RX_FALLBACK_QDMA]++;
 	en7523_wifi_stats[band][3]++;
 host:
 	next = id;
@@ -358,13 +459,32 @@ void en7523_rx_poll(u32 band)
 #endif
 
 #if defined(EN7523) && defined(HAS_WIFI)
-int en7523_rx_process(u32 id, u32 len, u32 band)
+static inline int en7523_rx_release_timed(u32 id, u32 len, u32 band,
+					  int reordered)
+{
+	int ret;
+#ifdef EN7523_RX_PROFILE
+	u32 stamp = en7523_rx_prof_begin(band);
+#endif
+
+	ret = en7523_rx_release(id, len, band, reordered);
+
+#ifdef EN7523_RX_PROFILE
+	en7523_rx_prof_end(band, EN7523_PROF_RX_RELEASE, stamp);
+#endif
+	return ret;
+}
+
+static int en7523_rx_process_frame(u32 id, u32 len, u32 band)
 {
 	u32 next = id, sum = 0, count = 0;
 	struct en7523_frame f;
 	struct en7523_sta *sta;
 	u32 *entry;
-	int managed;
+	int managed, decoded;
+#ifdef EN7523_RX_PROFILE
+	u32 stamp;
+#endif
 
 	while (next < 5600 && count++ < 7) {
 		sum += rx_chain[next] >> 16;
@@ -374,7 +494,18 @@ int en7523_rx_process(u32 id, u32 len, u32 band)
 		en7523_rx_free(id);
 		return -1;
 	}
-	if (!rx_decode(id, len, &f)) {
+#ifdef EN7523_RX_PROFILE
+	stamp = en7523_rx_prof_begin(band);
+#endif
+	decoded = rx_decode(id, len, &f);
+#ifdef EN7523_RX_PROFILE
+	en7523_rx_prof_end(band, EN7523_PROF_RX_FIRST_DECODE, stamp);
+#endif
+	if (!decoded) {
+		/* No other frame may reuse the current buffer while it is owned. */
+		rx_cache[band].id = id;
+		rx_cache[band].len = len;
+		rx_cache[band].frame = &f;
 		sta = &stations[band * (EN7523_STA_MAX + 1) + f.node.wcid];
 		if (sta->enabled && (f.fc & 0xfc) == 0x84 && f.node.tid < 8) {
 			entry = (u32 *)((band ? ba_table_b : ba_table_a) +
@@ -386,17 +517,34 @@ int en7523_rx_process(u32 id, u32 len, u32 band)
 			}
 		}
 	}
+#ifdef EN7523_RX_PROFILE
+	stamp = en7523_rx_prof_begin(band);
+#endif
 	managed = en7523_rx_managed(id, len, band);
+#ifdef EN7523_RX_PROFILE
+	en7523_rx_prof_end(band, EN7523_PROF_RX_MANAGED, stamp);
+#endif
 	if (managed) {
 		if (!f.fragment && !(f.fc & 0x0400) && (f.fc & 0xfc) == 0x88) {
 			entry = (u32 *)((band ? ba_table_b : ba_table_a) +
 				       28 * (8 * (f.node.wcid - 1) + f.node.tid));
 			/* Without BA, duplicate filtering still belongs to the host. */
 			if (*(u8 *)((u32)entry + 24) != 4)
-				return en7523_rx_release(id, len, band, 2);
-			if (en7523_rx_classify(id, len, band) < 0)
-				return 0;
-			return en7523_rx_release(id, len, band, 3);
+				return en7523_rx_release_timed(id, len, band, 2);
+			{
+				int classified;
+
+#ifdef EN7523_RX_PROFILE
+				stamp = en7523_rx_prof_begin(band);
+#endif
+				classified = en7523_rx_classify(id, len, band);
+#ifdef EN7523_RX_PROFILE
+				en7523_rx_prof_end(band, EN7523_PROF_BA_CLASSIFY, stamp);
+#endif
+				if (classified < 0)
+					return 0;
+			}
+			return en7523_rx_release_timed(id, len, band, 3);
 		}
 		/* Fragments keep host defragmentation and advance the BA window. */
 		if (f.fragment || (f.fc & 0x0400)) {
@@ -415,7 +563,7 @@ int en7523_rx_process(u32 id, u32 len, u32 band)
 				ba_indicate_le_seq(entry, (f.node.sn - 1) & 0xfff);
 				*(u16 *)((u32)entry + 18) = (f.node.sn - 1) & 0xfff;
 			}
-			ret = en7523_rx_release(id, len, band, 6);
+			ret = en7523_rx_release_timed(id, len, band, 6);
 			if (*(u8 *)((u32)entry + 24) == 4 && !(f.fc & 0x0400)) {
 				*(u16 *)((u32)entry + 18) = f.node.sn;
 				last = ba_seq_scan(entry, f.node.sn);
@@ -424,8 +572,22 @@ int en7523_rx_process(u32 id, u32 len, u32 band)
 			}
 			return ret;
 		}
-		return en7523_rx_release(id, len, band, 2);
+		return en7523_rx_release_timed(id, len, band, 2);
 	}
-	return en7523_rx_release(id, len, band, 0);
+	return en7523_rx_release_timed(id, len, band, 0);
+}
+
+int en7523_rx_process(u32 id, u32 len, u32 band)
+{
+	int ret;
+
+	if (band > 1)
+		return -1;
+
+	/* The worker is single-owner per band; no cached state survives a frame. */
+	rx_cache[band].frame = 0;
+	ret = en7523_rx_process_frame(id, len, band);
+	rx_cache[band].frame = 0;
+	return ret;
 }
 #endif

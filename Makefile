@@ -17,19 +17,21 @@ NPUTX ?= 1
 NPUDBG ?= 0
 # 1 builds the profiler: section timers and PC sampling (docs/debug.md)
 PROF ?= 0
+# 1 profiles native MT7915 RX at 1/64 frames and active DMA batches.
+RXPROF ?= 0
 # 1 builds for the Clanker host drivers, this changes behaviour and might break with stock driver
 CLANKER ?= 0
 # git short hash in the boot version line; pin it to compare images
 GITREV ?= $(shell git describe --always --dirty --abbrev=7 2>/dev/null || echo nogit)
 
 NPU_VERSION_MAJOR  := 7
-NPU_VERSION_MINOR  := $(if $(filter EN7523_MT7915,$(SOC)_$(WIFI)),14,13)
-NPU_VERSION_REV    := $(if $(filter EN7523_MT7915,$(SOC)_$(WIFI)),1,0)
+NPU_VERSION_MINOR  := $(if $(filter EN7523_MT7915 EN7523_MT7916,$(SOC)_$(WIFI)),14,13)
+NPU_VERSION_REV    := $(if $(filter EN7523_MT7915 EN7523_MT7916,$(SOC)_$(WIFI)),1,0)
 NPU_VERSION_STABLE := 0
 
 ifeq ($(SOC),EN7523)
-ifeq ($(filter $(WIFI),NOWIFI MT7915),)
-$(error EN7523 supports NOWIFI or MT7915)
+ifeq ($(filter $(WIFI),NOWIFI MT7915 MT7916),)
+$(error EN7523 supports NOWIFI, MT7915 or MT7916)
 endif
 ARCH := -march=rv32im_zicsr_zifencei -mabi=ilp32
 else
@@ -46,6 +48,7 @@ CFLAGS  := $(ARCH) -Os -ffunction-sections -fdata-sections \
            $(if $(filter 0,$(NPUTX)),-DEAGLE_NO_TX_PUSH) \
            $(if $(filter 1,$(NPUDBG)),-DNPU_DATAPATH_DBG) \
            $(if $(filter 1,$(PROF)),-DNPU_PROFILE) \
+           $(if $(filter EN7523_MT7915_1,$(SOC)_$(WIFI)_$(RXPROF)),-DEN7523_RX_PROFILE) \
            $(if $(filter 1,$(CLANKER)),-DUSE_CLANKER_DRIVER)
 ASFLAGS := $(ARCH) -D$(SOC) -D$(WIFI)
 LIBGCC  := $(shell $(CC) $(ARCH) -print-libgcc-file-name)
@@ -122,7 +125,7 @@ clean:
 	rm -rf build/
 
 # Build the supported variant matrix
-VARIANTS := EN7523_NOWIFI EN7523_MT7915                                                                       \
+VARIANTS := EN7523_NOWIFI EN7523_MT7915 EN7523_MT7916                                                                       \
             AN7552_NOWIFI AN7552_MT7916 AN7552_MT7991               AN7552_MT7993               \
             AN7581_NOWIFI AN7581_MT7916               AN7581_MT7992                             \
             AN7583_NOWIFI AN7583_MT7916               AN7583_MT7992 AN7583_MT7993 AN7583_MT7996

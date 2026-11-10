@@ -58,8 +58,8 @@
 #if defined(EN7523)
 #define MAX_CORE_NUM    4
 #define NPU_TIMER_NUM   4
-#if !defined(NOWIFI) && !defined(MT7915)
-#error "EN7523 supports NOWIFI or MT7915"
+#if !defined(NOWIFI) && !defined(MT7915) && !defined(MT7916)
+#error "EN7523 supports NOWIFI, MT7915 or MT7916"
 #endif
 #elif defined(AN7552)
 #define MAX_CORE_NUM    2

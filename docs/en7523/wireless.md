@@ -5,6 +5,8 @@ It uses the MT7915 path in mt76. Build its NPU image with:
 
 ```sh
 make SOC=EN7523 WIFI=MT7915
+# Optional MT7916 image (not validated on hardware):
+make SOC=EN7523 WIFI=MT7916
 ```
 
 Install the matching `build/en7523_mt7915_npu_rv32.bin` and
@@ -46,6 +48,29 @@ consumer; changing it after ring preparation is rejected. A DBDC driver
 still accepts firmware 7.8 and publishes both rings before starting them.
 Firmware 7.9 also supports the XX230v DBDC configuration.
 
+## Kite BA and protected RX (incremental integration)
+
+The EN7523 MT7915 RX transport feeds the shared Kite classifier in
+`npu_wifi_rx.c` and the common BA engine in `npu_wifi_ba.c`. The
+EN7523-specific adapter parses the MT7915 RXD, owns its PCIe buffers
+and submits eligible **unprotected** IPv4 packets to QDMA/PPE.
+
+A protected QoS frame with an active BA session now follows Kite's
+sequence/reordering rules. The NPU still copies the complete RXD and
+payload to mt76/mac80211: it does **not** set `REORDERED`,
+`PN_VALID` or `BYPASS_BA` in the host descriptor. This avoids
+asserting that mac80211 duplicate/PN checks have already run.
+
+Only metadata validated by the radio and replay/key state synchronized
+with mt76 can authorize protected direct PPE forwarding. The current
+firmware does not implement this contract. `SEC_MODE` or the 802.11
+Protected bit alone is not a replay-validation indication.
+
+`SET_KEY` still retires the NPU BA session; if a key changes while
+RX BA is active, the session remains host-managed until re-established.
+This is a correctness-first shared-Kite integration, not yet WPA direct
+PPE offload.
+
 ## Receive path
 
 Hart 0 initializes the common SRAM allocator and software buffer-ID pool.
@@ -60,26 +85,20 @@ with a different ID. Buffers remain owned until host copying finishes, or both
 QDMA completion and the native PPE buffer return have arrived. Scattered radio buffers are chained;
 only a complete frame enters parsing or the host transport.
 
-Firmware 7.13 adds direct routed IPv4 ingress for authorized AP stations with
-open security or hardware-decrypted CCMP-128, WCID 1..150 and TID 0..7,
-with an active negotiated BA session. Without BA, host duplicate filtering
-remains in charge and the packet keeps the raw host path.
-The source Ethernet address must match the station and the destination must
-match the router address supplied by mt76. This leaves intra-BSS/bridged
-traffic, multicast, VLAN frames, ARP, EAPOL, unsupported ciphers, translation
-errors and multi-buffer frames on the normal host path. MT7916 is not an
-EN7523 build target yet.
+The native direct path accepts eligible routed IPv4 ingress for authorized
+AP stations with open security, WCID 1..150, TID 0..7 and an active BA
+session. Without BA, duplicate filtering remains with the host. Source MAC,
+header translation and protocol validation also gate native forwarding.
+Multicast, ARP, EAPOL, unsupported translations and multi-buffer frames
+retain the complete RXD and use the normal host path. The EN7523/MT7916 image builds, but its RXD and PCIe transport still
+require hardware validation before use.
 
-The NPU owns the negotiated BA receive window and checks CCMP key index and
-PN after reordering. A-MSDU members may share a PN only while continuing the
-same sequence. Old sequence numbers and replayed PNs are discarded. Fragments
-remain raw for host defragmentation and share the replay counter. mt76 also
-retains mac80211 PN validation for fragments: reassembly requires its sequential
-PN and key-color checks even when the NPU has already rejected replays. Missing
-sequence gaps expire after more than three 10 ms ticks. Key installation is
-bracketed by a worker pause and a commit that discards pending radio RX,
-flushes held frames against the old replay state and installs the new state.
-Station revocation disables direct forwarding before its BA queues are drained.
+The Kite BA engine sorts MPDUs by sequence number and drops duplicates.
+It does not validate CCMP/GCMP packet numbers. For protected frames, the
+NPU never sets the host `PN_VALID` or `REORDERED` claims and never submits
+them to PPE; mt76/mac80211 retains replay and key-generation validation.
+BA timeouts use the configured tick-based flush interval. Key installation
+and station removal invalidate the NPU BA state before WCID reuse.
 
 Firmware 7.14 keeps eligible frames in their original packet buffer, without
 inserting a private VLAN. TX ring 6 uses the vendor NPU message words:

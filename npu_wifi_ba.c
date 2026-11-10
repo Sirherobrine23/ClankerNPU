@@ -88,9 +88,18 @@ NPU_HOT int pkt_enqueue_bridge(u32 buf_id, u32 pkt_len, u32 hdr,
 		       u32 band, u32 bss)
 {
 #ifdef EN7523
+	int ret;
+#ifdef EN7523_RX_PROFILE
+	u32 stamp = en7523_rx_prof_begin(band);
+#endif
+
 	(void)hdr;
 	(void)bss;
-	return en7523_rx_release(buf_id, pkt_len, band, 3);
+	ret = en7523_rx_release(buf_id, pkt_len, band, 3);
+#ifdef EN7523_RX_PROFILE
+	en7523_rx_prof_end(band, EN7523_PROF_BA_FORWARD, stamp);
+#endif
+	return ret;
 #else
 	u32 size, tx_len;
 	int ret;

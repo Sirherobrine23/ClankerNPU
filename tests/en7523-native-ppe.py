@@ -34,7 +34,8 @@ def rx_frame(sn, wcid=1, encrypted=False, proto=0x800, source=None):
     payload = bytes.fromhex('020102030405') + (source or mac) + proto.to_bytes(2, 'big')
     payload += bytes.fromhex('450000280000000040060000c0000201c6336401') + bytes(20)
     raw = bytearray(40 + len(payload))
-    struct.pack_into('<6I', raw, 0, 2 << 27 | len(raw), wcid | 1 << 14,
+    struct.pack_into('<6I', raw, 0, 2 << 27 | len(raw),
+                     wcid | 1 << 14 | ((4 << 16) if encrypted else 0),
                      1 << 13, 1 << 16, 0, 0)
     struct.pack_into('<H', raw, 24, 0x188 | (0x4000 if encrypted else 0))
     raw[26:32] = mac
@@ -118,9 +119,9 @@ for band, sn in ((0, 13), (1, 11)):
     check_host(band, head, blob, len(blob), 1, 1, True,
                vendor=0x90000000 | metadata)
 
-# Encrypted, ARP and forged translated sources stay with the host.
-# The encrypted fixture intentionally bypasses firmware reordering.
-control_data(4, struct.pack('<IIII', 1, 0, 15, 64))
+# Kite orders secured frames, but raw host metadata must not claim PN checks.
+# ARP and forged translations also retain the complete host RXD.
+control_data(4, struct.pack('<IIII', 1, 0, 14, 64))
 for sn, kwargs, flags in ((14, dict(encrypted=True), 0),
                           (15, dict(proto=0x806), 0x80000000),
                           (16, dict(source=b'\x02'*6), 0x80000000)):
@@ -131,8 +132,24 @@ for sn, kwargs, flags in ((14, dict(encrypted=True), 0),
     check_host(0, head, blob, len(blob), 1, 1, True, vendor=flags)
     assert read(0x1fb541c8) == before
 
+# Protected frames enter the shared Kite window and leave in sequence.
+head = read(0x1ec0d188)
+before = read(0x1fb541c8)
+protected_hi = rx_frame(18, encrypted=True)
+protected_lo = rx_frame(17, encrypted=True)
+packet(0, protected_hi)
+assert read(0x1ec0d188) == head
+packet(0, protected_lo)
+for i, blob in enumerate((protected_lo, protected_hi)):
+    check_host(0, (head+i) % 512, blob, len(blob), 1, 1, True, vendor=0)
+assert read(0x1fb541c8) == before, 'protected frame entered the PPE'
+# A repeated MPDU from the same BA window must not be forwarded twice.
+packet(0, rx_frame(18, encrypted=True))
+assert read(0x1ec0d188) == (head + 2) % 512
+assert read(0x1fb541c8) == before
+
 # DEL_STA invalidates late exceptions and flushes held frames before WCID reuse.
-index, ident, _ = submit(17)
+index, ident, _ = submit(19)
 set_cmd(6, 1)
 head = read(0x1ec0d188)
 ppe_returns.append((ident, 0xe << 16))
@@ -168,4 +185,4 @@ set_cmd(6, native_wcid[1], 1)
 for band in range(2):
     set_cmd(12, 1, band)
 assert not ppe_returns and all(not status(i) for i in range(5600))
-print('PASS: SDK BA admission, both RX channels, native reorder, both completion orders, raw/FoE exceptions, encrypted fallback, DEL_STA and STOP lifetime')
+print('PASS: shared Kite BA, protected in-order host delivery without PN flags, QDMA/PPE ownership, DEL_STA and STOP')

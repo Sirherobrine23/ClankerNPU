@@ -246,11 +246,16 @@ static s32 kite_classify(s32 buf_id, u32 len, u32 band)
 		if (last == sn) {
 			/* duplicate */
 			wifi_cnt_inc(band, 56);
+#ifdef EN7523
+			/* Duplicate MPDUs must not re-enter PPE or mac80211. */
+			buf_id_free(0, band, pn.buf_id);
+#else
 			if (kite_fast_flag() & 1)
 				pkt_enqueue_bridge(pn.buf_id, pn.len, pn.hdr,
 						   band, pn.bss);
 			else
 				buf_id_free(0, band, pn.buf_id);
+#endif
 			if (pn.amsdu <= 1)
 				entry[3] = 0;
 			*(u8 *)(e + 23) = 1;
@@ -406,6 +411,36 @@ in_order:
 	*(u8 *)(e + 23) = 0;
 	return -1;
 }
+
+#ifdef EN7523
+/* An empty BA window can forward the next complete MPDU without queue work. */
+static NPU_HOT s32 kite_classify_in_order(s32 id, u32 len, u32 band)
+{
+	struct kite_node pn;
+	u32 e;
+
+	if (wifi_no_ba_test || (wifi_debug_flags & 4) ||
+	    kite_rx_parse(id, &pn, len, band))
+		return kite_classify(id, len, band);
+	e = (band ? ba_table_b : ba_table_a) +
+	    28 * (8 * (pn.wcid - 1) + pn.tid);
+	if (*(u8 *)(e + 24) != 4 || *(u32 *)e ||
+	    *(u32 *)(e + 4) || *(u16 *)(e + 8) ||
+	    *(u32 *)(e + 12) || pn.amsdu > 1 ||
+	    *(u8 *)(e + 22) > 1 || *(u8 *)(e + 23) ||
+	    ((*(u16 *)(e + 18) + 1) & 0xfff) != pn.sn)
+		return kite_classify(id, len, band);
+
+	wifi_cnt_inc(band, 52);
+	*(u8 *)(e + 25) = band;
+	pkt_enqueue_bridge(pn.buf_id, pn.len, pn.hdr, band, pn.bss);
+	*(u16 *)(e + 18) = pn.sn;
+	*(u16 *)(e + 20) = pn.sn;
+	*(u8 *)(e + 22) = pn.amsdu;
+	*(u8 *)(e + 23) = 0;
+	return -1;
+}
+#endif
 
 #if MAX_CORE_NUM <= 2
 /* -1 when the window took the frame, else the caller sends it up */
@@ -926,6 +961,6 @@ void __attribute__((noreturn)) wifi_bridge_loop(void)
 #if defined(EN7523) && defined(HAS_WIFI)
 s32 en7523_rx_classify(s32 id, u32 len, u32 band)
 {
-	return kite_classify(id, len, band);
+	return kite_classify_in_order(id, len, band);
 }
 #endif

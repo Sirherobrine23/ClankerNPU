@@ -16,6 +16,88 @@
 #define EN7523_STA_MAX		150
 #define EN7523_QDMA_COUNT	1024
 
+#ifdef EN7523_RX_PROFILE
+/* A radio hart owns each band's samples; hart 0 reads periodic snapshots. */
+enum en7523_rx_prof_stage {
+	EN7523_PROF_RX_DESC,
+	EN7523_PROF_BUF_ALLOC,
+	EN7523_PROF_RX_PROCESS,
+	EN7523_PROF_RX_FIRST_DECODE,
+	EN7523_PROF_RX_MANAGED,
+	EN7523_PROF_BA_CLASSIFY,
+	EN7523_PROF_BA_FORWARD,
+	EN7523_PROF_RX_RELEASE,
+	EN7523_PROF_RX_DECODE,
+	EN7523_PROF_QDMA_SUBMIT,
+	EN7523_PROF_QDMA_LOCK,
+	EN7523_PROF_QDMA_DESC,
+	EN7523_PROF_QDMA_KICK,
+	EN7523_PROF_PCIE_KICK,
+	EN7523_PROF_BA_SCAN,
+	EN7523_PROF_HOST_FLUSH,
+	EN7523_PROF_STAGE_MAX,
+};
+
+struct en7523_rx_prof_stage_stats {
+	volatile u32 samples;
+	volatile u32 cycles;
+	volatile u32 max_cycles;
+};
+
+extern volatile struct en7523_rx_prof_stage_stats
+	en7523_rx_prof[2][EN7523_PROF_STAGE_MAX];
+extern volatile u32 en7523_rx_prof_active[2];
+extern volatile u32 en7523_rx_prof_desc[2];
+extern volatile u32 en7523_rx_prof_frames[2];
+extern volatile u32 en7523_rx_prof_kicks[2];
+extern volatile u32 en7523_rx_cache_hits[2];
+
+static inline u32 en7523_rx_prof_begin(u32 band)
+{
+	return en7523_rx_prof_active[band] ? (u32)csr_read(mcycle) : 0;
+}
+
+static inline void en7523_rx_prof_end(u32 band,
+				      enum en7523_rx_prof_stage stage,
+				      u32 start)
+{
+	volatile struct en7523_rx_prof_stage_stats *s;
+	u32 elapsed;
+
+	if (!en7523_rx_prof_active[band])
+		return;
+	elapsed = (u32)csr_read(mcycle) - start;
+	s = &en7523_rx_prof[band][stage];
+	s->cycles += elapsed;
+	if (elapsed > s->max_cycles)
+		s->max_cycles = elapsed;
+	s->samples++;
+}
+#endif
+
+/* RX admission diagnostics. Counters are written by the owning radio hart. */
+enum en7523_rx_fallback_reason {
+	EN7523_RX_FALLBACK_DECODE,
+	EN7523_RX_FALLBACK_BAD,
+	EN7523_RX_FALLBACK_CRYPTO,
+	EN7523_RX_FALLBACK_NO_SESSION,
+	EN7523_RX_FALLBACK_NOT_REORDERED,
+	EN7523_RX_FALLBACK_DIRECT_DISABLED,
+	EN7523_RX_FALLBACK_CHAINED,
+	EN7523_RX_FALLBACK_FRAME_FORMAT,
+	EN7523_RX_FALLBACK_ETH_FORMAT,
+	EN7523_RX_FALLBACK_IPV4_FORMAT,
+	EN7523_RX_FALLBACK_L4_PROTO,
+	EN7523_RX_FALLBACK_SOURCE,
+	EN7523_RX_FALLBACK_TRANSLATION,
+	EN7523_RX_FALLBACK_QDMA,
+	EN7523_RX_FALLBACK_MAX,
+};
+
+#ifdef EN7523
+extern volatile u32 en7523_rx_fallback[2][EN7523_RX_FALLBACK_MAX];
+#endif
+
 struct kite_node {
 	u32 next, msdu_head, msdu_tail;
 	u16 msdu_cnt, pad0;

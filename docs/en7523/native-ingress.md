@@ -33,6 +33,51 @@ to release storage while QDMA/PPE still own a buffer. Key installation also
 retires open-network sessions, including peer sessions when a group key is
 installed.
 
+## RX descriptor index batching
+
+The EN7523 native receive worker handles up to 32 descriptors per pass and
+publishes the last consumed descriptor once after the pass. The ring has 1536
+descriptors, so a batch cannot exhaust it. A partial or single-descriptor
+pass also publishes the index before returning to the polling loop. This
+reduces PCIe MMIO writes during bursts without delaying the final refill.
+
+This change reduces software overhead but does not establish that PCIe index
+writes are the throughput bottleneck; compare the same client, RF conditions,
+and upstream endpoint before and after applying it.
+
+## RX cycle profiling
+
+Build with `make SOC=EN7523 WIFI=MT7915 RXPROF=1` after the RX batching
+change. The default image has no profiler. When the RX debug print mask is
+set, hart 0 reports `[RX PROF]` summaries every 500 KITE ticks. Nothing is
+printed by the radio harts or inside an interrupt handler.
+
+The `desc`, `frames`, and `kicks` values are interval deltas; `batch_x10`
+is descriptors per published PCIe index multiplied by ten. Each stage reports
+`n` samples, `avg` cycles per sample, and `max` cycles since boot. The
+firmware samples one in 64 completed frames and one in 64 nonempty batches.
+With the EN7523 core at 250 MHz, 250 cycles are approximately one microsecond.
+
+The sampled `rx-desc` interval encloses `buf-alloc` and `rx-process`;
+`rx-process` encloses decode and QDMA submission. `qdma-submit` includes
+`qdma-lock`, `qdma-descriptor`, and `qdma-kick`. Do not add the nested times together.
+The `pcie-kick` timer measures the cost of issuing a posted MMIO write,
+not PCIe transaction completion. `first-decode` is the initial RXWI parse,
+`rx-managed` includes another RXWI parse, and `ba-classify` measures the
+reorder/classification call (which also parses the RXWI). `rx-release`
+includes the final RXWI parse, forwarding checks and `qdma-submit`. These
+four stages are inside `rx-process`; the latter two are not disjoint from
+`decode` and `qdma-submit`. All measurements are sampled, not per-packet logs. `ba-scan` and `host-flush` are sampled on
+nonempty RX batches. These timings cannot directly measure GPON airtime,
+802.11 retransmissions or time spent waiting for new RX descriptors.
+
+Compare a 30-second Wi-Fi upload with a cable baseline and the same firmware
+built with `RXPROF=0`. High `qdma-lock` cycles point to contention with the
+completion hart; high `qdma-descriptor` cycles point to descriptor/fence/MMIO
+cost. High `rx-process` with low `qdma-submit` suggests parsing or BA work.
+A low `rx-desc` average with low throughput means the next suspect is RX
+arrival rate, aggregation, or a downstream shaper rather than CPU execution.
+
 ## Validation and target checks
 
 Build and run the instruction-level firmware model:
@@ -59,3 +104,22 @@ BA, with OpenWrt hardware flow offload enabled. Check the serial counters:
   establish actual acceleration. Throughput alone is insufficient.
 
 WED error status `00080000` is a separate issue and is not fixed by this change.
+
+### RXWI reuse (0005)
+
+EN7523 keeps a decoded RXWI frame context only while a radio hart is
+processing the matching `(band, buffer ID, length)` tuple. `rx-managed`,
+`en7523_rx_parse()` and the forwarding callback reuse that context. When BA
+releases older buffered MPDUs, their descriptors are decoded independently.
+The context is invalidated on every return from `en7523_rx_process()`,
+including duplicate/drop and host fallback paths. No replay, BA or QDMA
+state changes are made by this optimization.
+
+With `RXPROF=1`, the `[RX PROF]` header includes `cache_hits`, the delta in
+reused RXWI decodes over that reporting interval. `ba-forward` measures
+`pkt_enqueue_bridge()` → `en7523_rx_release()` and includes QDMA submission;
+`ba-classify` encloses the forwarding call. Subtracting two independently
+sampled averages is only an estimate, not an exact exclusive BA cost.
+
+Compare equal-duration A/B `iperf3` tests before and after this change and
+check that PPE exception, fallback and TCP retransmit counts do not regress.
