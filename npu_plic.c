@@ -1,13 +1,106 @@
 /*
  * AN75XX NPU firmware - PLIC
  *
- * 192 interrupt sources. The hardware numbers them from 1, this code
- * numbers them from 0.
+ * EN7523 uses its native 128-source PLIC, with per-hart enable masks
+ * and CSR-based claim/complete. AN75xx uses the 192-source generic PLIC.
  */
 
 #include "npu_internal.h"
 
 
+#ifdef EN7523
+
+void plic_global_init(void)
+{
+	u32 src, hart, word;
+
+	/* Run once, before any hart enables delivery or registers a handler. */
+	for (hart = 0; hart < MAX_CORE_NUM; hart++) {
+		for (word = 0; word < 4; word++)
+			REG32(PLIC_HART_ENABLE(hart, word)) = 0;
+		REG32(PLIC_THRESHOLD(hart)) = 0;
+	}
+	for (src = 0; src < PLIC_MAX_SOURCE; src += 4)
+		REG32(PLIC_PRIORITY(src)) = 0x40404040;
+	/* Match the vendor priority for the PPE return source. It stays off. */
+	REG32(PLIC_PRIORITY(96)) = 0x40404041;
+}
+
+void plic_init(void)
+{
+	u32 word, hart = get_hartid();
+
+	for (word = 0; word < 4; word++)
+		REG32(PLIC_HART_ENABLE(hart, word)) = 0;
+	REG32(PLIC_THRESHOLD(hart)) = 0;
+	/* These local source masks are part of the v1
+	 * vendor initialization, not SiFive PLIC contexts. */
+	csr_write(0x5e8, ALL_FF);
+	csr_write(0x5e9, ALL_FF);
+	csr_write(0x5ea, ALL_FF);
+	csr_write(0x5eb, ALL_FF);
+	csr_write(0x5d8, ALL_FF);
+	csr_write(0x5d9, ALL_FF);
+	csr_write(0x5da, ALL_FF);
+	csr_write(0x5db, ALL_FF);
+}
+
+void plic_enable(u32 src)
+{
+	if (src < PLIC_MAX_SOURCE)
+		REG32(PLIC_HART_ENABLE(get_hartid(), src / 32)) |=
+			1u << (src & 31);
+}
+
+void plic_disable(u32 src)
+{
+	if (src < PLIC_MAX_SOURCE)
+		REG32(PLIC_HART_ENABLE(get_hartid(), src / 32)) &=
+			~(1u << (src & 31));
+}
+
+void plic_enable_wrapper(u32 src)
+{
+	plic_enable(src);
+}
+
+void plic_register_isr(u32 src, isr_fn_t handler)
+{
+	if (src >= PLIC_MAX_SOURCE || !handler)
+		return;
+	if (plic_isr_table[src] && plic_isr_table[src] != handler)
+		return;
+	plic_isr_table[src] = handler;
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+	plic_enable(src);
+}
+
+void call_isr_by_src(u32 src)
+{
+	u32 hart = get_hartid();
+	u32 active = REG32(PLIC_ACTIVE(hart));
+
+	if (src < PLIC_MAX_SOURCE && plic_isr_table[src]) {
+		plic_isr_table[src](src);
+	} else {
+		/* Do not print or acquire mutexes in an unexpected ISR. */
+		plic_disable(src);
+	}
+	REG32(PLIC_ACTIVE(hart)) = active;
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+	csr_write(0x5c2, src);
+}
+
+void plic_handle_irq(void)
+{
+	u32 hart = get_hartid(), src = csr_read(0x5c0) & 0x7f;
+
+	ndbg->hart[hart].in_isr = 1;
+	call_isr_by_src(src);
+	ndbg->hart[hart].in_isr = 0;
+}
+
+#else
 /* ================================================================
  * PLIC (Platform-Level Interrupt Controller)
  * ================================================================ */
@@ -135,3 +228,5 @@ void plic_register_isr(u32 src, isr_fn_t handler)
 	}
 	plic_enable(src);
 }
+
+#endif /* EN7523 */

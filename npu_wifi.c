@@ -76,7 +76,7 @@ int wifi_mail_dispatch(u32 base, u32 cnt)
 	NDBG_TRACE(NDBG_WIFI, func_type << 8 | (msg[1] & 0xFF), msg[2], msg[3]);
 	switch (func_type) {
 	case NPU_OP_SET:
-		if (msg[1] > WLAN_FUNC_SET_WAIT_MAX)
+		if (msg[1] >= WLAN_FUNC_SET_WAIT_MAX)
 			return wifi_mail_exceed(msg, 1);
 
 		return wifi_mail_call(set_wait_func_table[msg[1]], msg, "set_wait");
@@ -87,7 +87,7 @@ int wifi_mail_dispatch(u32 base, u32 cnt)
 
 		return wifi_mail_call(NULL, msg, "set_nowait");
 	case NPU_OP_GET:
-		if (msg[1] > WLAN_FUNC_GET_WAIT_MAX)
+		if (msg[1] >= WLAN_FUNC_GET_WAIT_MAX)
 			return wifi_mail_exceed(msg, 3);
 
 		return wifi_mail_call(get_wait_func_table[msg[1]], msg, "get_wait");

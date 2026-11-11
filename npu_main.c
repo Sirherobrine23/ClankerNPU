@@ -122,7 +122,7 @@ static void npu_core_probe(void)
 {
 	u32 en = REG32(CR_CORE_BOOT_CONFIG) & 0xFF, live = 0, c, i;
 
-	for (c = 0; c < 8; c++)
+	for (c = 0; c < NPU_CLUSTER_SLOTS; c++)
 		for (i = 0; i < 4 && !(live & (1u << c)); i++)
 			if (REG32(NPU_CSR_PC(c)) != 0)
 				live |= 1u << c;
@@ -441,9 +441,13 @@ TRAP_HOT u32 trap_dispatch(u32 mcause, u32 mepc, u32 *sp, u32 ra)
 	volatile struct ndbg_hart *hp = &ndbg->hart[get_hartid()];
 
 	if (mcause == MCAUSE_MACHINE_EXT_IRQ) {
+#ifdef EN7523
+		plic_handle_irq(); /* native CSR 0x5c0/0x5c2 */
+#else
 		hp->in_isr = 1;
 		call_isr_by_src(REG32(PLIC_CLAIM_REG) - 1);
 		hp->in_isr = 0;
+#endif
 		return mepc;
 	}
 
@@ -457,11 +461,19 @@ TRAP_HOT u32 trap_dispatch(u32 mcause, u32 mepc, u32 *sp, u32 ra)
 	NDBG_TRACE(NDBG_TRAP, mcause & 0xFFFFF, mepc, hp->mtval);
 	hp->in_isr = 0;
 
+#ifdef EN7523
+	/* Preserve mcause/mepc/mtval in the shared debug block. */
+	irq_disable();
+	csr_write(mie, 0);
+	for (;;)
+		__asm__ volatile("nop");
+#else
 	npu_printf("UnKnow Interrupts (mcause:0x%x, RA:0x%x, SP:0x%x, EPC:%x)\n",
 		   mcause, ra, (u32)sp, mepc);
 
 	/* step over the faulting instruction; it may be compressed */
 	return mepc + (((*(volatile u16 *)mepc) & 3) == 3 ? 4 : 2);
+#endif
 }
 
 /* trap_dispatch and every ISR are C and keep s0-s11 themselves */
@@ -562,6 +574,11 @@ void npu_init(void)
 	u32 hart = get_hartid();
 	u32 mib21;
 
+#ifdef EN7523
+	/* Enable this hart's cycle counter before the first startup delay. */
+	csr_write(0xbc0, 1);
+#endif
+
 	/* hart 0 clears sync flag; others wait */
 	if (hart != 0)
 		delay_ms_mcycle(10);
@@ -572,6 +589,10 @@ void npu_init(void)
 			delay_ms_mcycle(100);
 		while (core_sync_flag == 0);
 	}
+#ifdef EN7523
+	__asm__ volatile("fence rw, rw" ::: "memory");
+	csr_clear(0x7c0, 0x40);
+#endif
 
 	/* init PLIC for this hart */
 	plic_init();
@@ -580,7 +601,9 @@ void npu_init(void)
 	irq_disable();
 	csr_write(mtvec, (unsigned long)trap_vector);
 	csr_write(mie, 0x800);
+#ifndef EN7523
 	irq_enable();
+#endif
 
 	/* hart 0 conditional block: first-time initialization */
 	if (npu_reset_pending != 0) {
@@ -588,6 +611,7 @@ void npu_init(void)
 		/* MIB21 gates npu_printf and does not survive the reset pulse */
 		mib21 = REG32(NPU_MIB21);
 		sim_mode_flag = REG32(NPU_MIB12);
+#ifndef EN7523
 		REG32(NPU_SCU_RSTCTRL1) = NPU_SCU_RST_ALL;
 		delay_ms_mcycle(1);
 		REG32(NPU_SCU_RSTCTRL1) = 0;
@@ -596,8 +620,12 @@ void npu_init(void)
 		REG32(NPU_THREAD_ENABLE) = 1;
 		delay_ms_mcycle(1);
 		REG32(NPU_MIB0) = ALL_FF;
+#endif
 		boot_uart_init();
 		npu_dbg_init();
+#ifdef EN7523
+		plic_global_init();
+#endif
 		REG32(NPU_MIB21) = mib21;
 		npu_printf("core freq at %d MHz\n", cpu_clock_get());
 		npu_printf("NPU Version: %s\n", NPU_VERSION);
@@ -607,15 +635,29 @@ void npu_init(void)
 			npu_printf("Error: OVER GLB_VAR_SRAM_SIZE. "
 				   "_data:0x%x, __bss_end:0x%x\n",
 				   NPU_SRAM_BASE, (u32)__bss_end);
+#ifndef EN7523
 		plic_register_isr(22, uart_rx_isr);
+#endif
 		timer_init(0, 1, 10);
 		mailbox_init();
 	}
 
 	/* hart 0 signals others to proceed */
-	if (hart == 0)
+	if (hart == 0) {
+#ifdef EN7523
+		__asm__ volatile("fence rw, rw" ::: "memory");
+#endif
 		core_sync_flag = 1;
+	}
 
+#ifdef EN7523
+	/* Native sources are enabled only after shared setup is published. */
+	plic_register_isr(8 + hart, mbox_isr);
+	if (hart == 2)
+		plic_register_isr(18, timer_isr);
+	csr_set(0x7c0, 0x40);
+	irq_enable();
+#endif
 	npu_core_selftest(hart);
 
 	/* boot signature */

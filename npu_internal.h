@@ -213,6 +213,10 @@ static inline __attribute__((always_inline)) void hw_mutex_give(u32 id)
 }
 
 /* npu_plic.c */
+#ifdef EN7523
+void plic_global_init(void);
+void plic_handle_irq(void);
+#endif
 void plic_init(void);
 void plic_enable(u32 src);
 void plic_disable(u32 src);

@@ -108,10 +108,7 @@ void timer_init(int timer, int enable, int period)
 #if defined(AN7581) || defined(EN7523)
 	REG32(timer_reload_reg[timer]) =
 		(u32)period * timer_input_clock_mhz() * 1000 / 100;
-#ifdef EN7523
-	/* The EN7523 has no dedicated AN7581 timer worker. */
-	plic_register_isr(timer_irq_map[timer], timer_isr);
-#endif
+/* Native EN7523 installs this ISR on hart 2 after shared init. */
 #else
 	REG32(timer_reload_reg[timer]) = 1000 * (u32)period * cpu_clock_div4();
 	/* AN7552 has no timer core: the tick runs on hart 0 */

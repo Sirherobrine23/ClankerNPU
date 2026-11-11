@@ -107,7 +107,7 @@
 #define HAS_TR471
 #endif
 
-#if !defined(AN7581) && defined(HAS_WIFI)
+#if !defined(AN7581) && !defined(EN7523) && defined(HAS_WIFI)
 #define HAS_BME
 #endif
 

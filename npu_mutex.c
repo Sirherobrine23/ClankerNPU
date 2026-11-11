@@ -27,6 +27,9 @@ NPU_HOT int hw_mutex_lock(u32 *desc)
 	sts = REG32(HW_MUTEX_STATUS(hart, off));
 	if (!(sts & HW_MUTEX_HELD))
 		return -1;
+#ifdef EN7523
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+#endif
 	return ((sts >> 8) & 0xFF) == hart ? 0 : -1;
 }
 
@@ -35,6 +38,9 @@ NPU_HOT int hw_mutex_unlock(u32 *desc)
 	u32 off = (desc[0] * 4) & HW_MUTEX_OFF_MASK;
 	u32 hart = get_hartid();
 
+#ifdef EN7523
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+#endif
 	REG32(HW_MUTEX_REL(hart, off)) = (hart << 8);
 	return 0;
 }
@@ -53,6 +59,9 @@ int hw_mutex_lock_pri(u32 *desc)
 	sts = REG32(HW_MUTEX_STATUS(hart, off));
 	if (!(sts & HW_MUTEX_HELD))
 		return -1;
+#ifdef EN7523
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+#endif
 	return ((sts >> 8) & 0xFF) == hart ? 0 : -1;
 }
 
