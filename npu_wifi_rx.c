@@ -12,6 +12,18 @@
 #define KITE_RX_BUF_LEN		0xDAC
 #define KITE_PIPE_ENTRIES	3200
 
+/* EN7523's SET_WAIT_DESC prepares the RXDs, but it does not start RX.
+ * The host configures the PCIe WFDMA and NPU->ARM rings afterwards.
+ * Do not let the RX harts consume unarmed descriptors until START ACK.
+ */
+#ifdef EN7523
+#define kite_rx_2g_ready() (rxd_2g_init_done != 0 && en7523_wifi_run[0] != 0)
+#define kite_rx_5g_ready() (rxd_5g_init_done != 0 && en7523_wifi_run[1] != 0)
+#else
+#define kite_rx_2g_ready() (rxd_2g_init_done != 0)
+#define kite_rx_5g_ready() (rxd_5g_init_done != 0)
+#endif
+
 /* the host changes these at run time */
 #define kite_fast_flag()	(*(volatile u8 *)&wifi_debug_flags)
 #define kite_driver_model()	(*(volatile u8 *)&wifi_driver_model)
@@ -790,14 +802,14 @@ NPU_HOT void __attribute__((noreturn)) kite_core1_loop(void)
 	while (1) {
 		npu_dbg_poll();
 #if MAX_CORE_NUM > 2
-		if (rxd_5g_init_done != 0)
+		if (kite_rx_5g_ready())
 			goto rx_5g;
 		/* leaves only on a mode change: each pass is a main loop pass */
-		while (rxd_2g_init_done != 0 &&
+		while (kite_rx_2g_ready() &&
 		       kite_dbdc_model(kite_driver_model())) {
 			npu_dbg_poll();
 			NPU_PROF1(NP_KRX2G, rxd_2g_cpu_idx, kite_rx_2g());
-			if (rxd_5g_init_done != 0) {
+			if (kite_rx_5g_ready()) {
 rx_5g:
 				NPU_PROF1(NP_KRX5G, rxd_5g_cpu_idx,
 					  kite_rx_5g());
@@ -805,9 +817,9 @@ rx_5g:
 		}
 #else
 		/* one frame per band a pass keeps the heartbeat moving */
-		if (rxd_2g_init_done != 0)
+		if (kite_rx_2g_ready())
 			NPU_PROF1(NP_KRX2G, rxd_2g_cpu_idx, kite_rx_2g());
-		if (rxd_5g_init_done != 0)
+		if (kite_rx_5g_ready())
 			NPU_PROF1(NP_KRX5G, rxd_5g_cpu_idx, kite_rx_5g());
 #endif
 	}
@@ -822,7 +834,7 @@ static void kite_core2_rx_2g(void)
 	/* leaves only on a mode change: each pass is a main loop pass */
 	do {
 		npu_dbg_poll();
-		if (rxd_2g_init_done != 0 && model == 0) {
+		if (kite_rx_2g_ready() && model == 0) {
 			NPU_PROF1(NP_KRX2G, rxd_2g_cpu_idx, kite_rx_2g());
 			model = kite_driver_model();
 			if (kite_dbdc_model(model))
@@ -842,12 +854,14 @@ static void __attribute__((noreturn)) kite_pipeline_worker(void)
 	u16 len;
 
 	npu_printf("[NPU1]  %s...\n", "npu_offload_5G_2");
-	while (rxd_5g_init_done == 0)
+	while (!kite_rx_5g_ready())
 		npu_dbg_poll();
 
 	npu_dbg_loop(NDBG_TAG('K', 'P', 'I', 'P'));
 	while (1) {
 		npu_dbg_poll();
+		if (!kite_rx_5g_ready())
+			continue;
 		slot = (volatile u32 *)(wifi_pipeline_base + ridx * 8);
 		id = (s32)*slot;
 		if (id == -1)

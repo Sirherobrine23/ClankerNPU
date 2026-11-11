@@ -36,7 +36,18 @@ static void wifi_rxd_set_buf(u32 desc, u32 buf_id)
 {
 	*(u32 *)desc = (((buf_id << 12) + wifi_pkt_buf_addr) & 0x3FFFFFFF) |
 		       0x80000000;
+#ifdef EN7523
+	/* A fresh 16-byte WFDMA RXD must have DDONE clear.  The Kite
+	 * poller interprets bit 31 of word 1 as a completed frame; keeping
+	 * old SRAM contents can make it consume a phantom RXD before the
+	 * host even enables the ring.  Match the v1 descriptor preparation.
+	 */
+	*(u32 *)(desc + 4) = 0xDACu << 16;
+	*(u32 *)(desc + 8) = 0;
+	*(u32 *)(desc + 12) = 0;
+#else
 	*(u16 *)(desc + 6) = (*(u16 *)(desc + 6) & 0x4000) | 0xDAC;
+#endif
 }
 
 /* The vendor allocates 0x6000 bytes per ring (1536 x 16 B).
@@ -77,6 +88,11 @@ static int wifi_init_rxd_5g(u32 ring_size, u32 band)
 		wifi_rxd_set_buf(rxd_base_5g + i * 16, id);
 	}
 
+#ifdef EN7523
+	/* Publish all DMA addresses and clear all DDONE bits before
+	 * advertising a prepared ring to the host and the other harts. */
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+#endif
 	rxd_5g_cpu_idx = 0;
 	rxd_5g_flush_tick = KITE_TICK;
 	rxd_5g_init_done = 1;
@@ -118,6 +134,9 @@ static int wifi_init_rxd_2g(u32 ring_size, u32 band)
 		wifi_rxd_set_buf(rxd_base_2g + i * 16, id);
 	}
 
+#ifdef EN7523
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+#endif
 	rxd_2g_cpu_idx = 0;
 	rxd_2g_flush_tick = KITE_TICK;
 	rxd_2g_init_done = 1;
