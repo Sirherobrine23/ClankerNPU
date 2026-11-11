@@ -134,16 +134,30 @@ static void kite_node_drain_loop(void)
 	do {
 		npu_dbg_poll();
 		if (rxd_5g_init_done != 0) {
+#ifdef EN7523
+			if (en7523_wifi_run[AIROHA_WLAN_BAND_5G] && hostadpt_rx_ready(AIROHA_WLAN_BAND_5G)) {
+				rxnode_drain(1);
+				pinode_drain(1);
+			}
+#else
 			if (hostadpt_tx_ring_ready == 1)
 				rxnode_drain(1);
 			if (hostadpt_tx_ring_ready == 1)
 				pinode_drain(1);
+#endif
 		}
 		if (rxd_2g_init_done != 0) {
+#ifdef EN7523
+			if (en7523_wifi_run[AIROHA_WLAN_BAND_2G] && hostadpt_rx_ready(AIROHA_WLAN_BAND_2G)) {
+				rxnode_drain(0);
+				pinode_drain(0);
+			}
+#else
 			if (hostadpt_tx_ring_ready == 1)
 				rxnode_drain(0);
 			if (hostadpt_tx_ring_ready == 1)
 				pinode_drain(0);
+#endif
 		}
 	} while (!(*(volatile u8 *)&wifi_debug_flags & 2));
 }

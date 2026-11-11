@@ -15,6 +15,12 @@
 
 #ifdef WIFI_KITE
 
+#ifdef EN7523
+/* START/STOP is an actual transport handshake, not an unconditional ACK.
+ * mt76 sends START only after publishing the NPU->ARM RX ring. */
+volatile u32 en7523_wifi_run[2];
+#endif
+
 static void npu_mbox_txrx_ring_size_get(u32 dir, u32 band, u32 *size)
 {
 	npu_printf("%s L%d not support on 791X\n",
@@ -236,8 +242,28 @@ int wifi_mail_set_desc(u32 *msg)
 
 int wifi_mail_set_init_done(u32 *msg)
 {
+#ifdef EN7523
+	u32 band = msg[0] & 15u, enable = msg[2];
+	npu_printf("%s runner for band %d\n", enable ? "enable" : "disable", band);
+
+	if (band > 1 || enable > 1)
+		return NPU_MBOX_EINVAL;
+	if (!enable) {
+		en7523_wifi_run[band] = 0;
+		__asm__ volatile("fence iorw, iorw" ::: "memory");
+		hostadpt_rx_stop(band);
+		return NPU_MBOX_SUCCESS;
+	}
+	if (!(band ? rxd_5g_init_done : rxd_2g_init_done) ||
+	    hostadpt_rx_init(band))
+		return NPU_MBOX_ENODEV;
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+	en7523_wifi_run[band] = 1;
+	return NPU_MBOX_SUCCESS;
+#else
 	(void)msg;
 	return 1;
+#endif
 }
 
 int wifi_mail_set_tran_to_cpu(u32 *msg)

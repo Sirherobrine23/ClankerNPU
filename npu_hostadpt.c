@@ -21,6 +21,55 @@ static u32 hostadpt_tx_ring_base;
 volatile u8 hostadpt_tx_ring_ready;
 static u32 hostadpt_rx_ring_base;
 
+#ifdef EN7523
+/* Bits 0/1: MT7915 host RX rings initialized by SET_WAIT_NPU_INIT_DONE.
+ * The host adaptor raises WLAN IRQ 35/36 when its DMA producer index moves. */
+static volatile u32 en7523_hostadpt_ready;
+
+int hostadpt_rx_ready(u32 band)
+{
+	return band < 2 && !!(en7523_hostadpt_ready & (1u << band));
+}
+
+int hostadpt_rx_init(u32 band)
+{
+	u32 base, count, dma_idx, cpu_idx;
+
+	if (band >= 2)
+		return -1;
+	base = REG32(HOSTADPT_RX_BASE_PTR(band));
+	count = REG32(HOSTADPT_RX_MAX_CNT(band));
+	dma_idx = REG32(HOSTADPT_RX_DMA_IDX(band));
+	cpu_idx = REG32(HOSTADPT_RX_CPU_IDX(band));
+
+	/* v1 EN7523 NPU uses the original physical DRAM mapping, not
+	 * the AN758x 0x40000000 alias.  512 x 24-byte host descriptors. */
+	if ((base & 3u) || base < 0x80000000u ||
+	    base > 0xc0000000u - 512u * 24u || count != 512u ||
+	    dma_idx >= count || cpu_idx >= count)
+		return -1;
+
+	if (band)
+		hostadpt_rx_ring_base = base;
+	else
+		hostadpt_tx_ring_base = base;
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+	en7523_hostadpt_ready |= 1u << band;
+	hostadpt_tx_ring_ready = 1;
+	return 0;
+}
+
+void hostadpt_rx_stop(u32 band)
+{
+	if (band >= 2)
+		return;
+	en7523_hostadpt_ready &= ~(1u << band);
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+	if (!en7523_hostadpt_ready)
+		hostadpt_tx_ring_ready = 0;
+}
+#endif
+
 #ifdef HAS_NPU_WIFI_TX
 /* host -> NPU tx rings: 208-byte entries, bit0 of word0 is the own bit */
 #define HOSTADPT_IN_ENTRY     208
@@ -41,20 +90,19 @@ int hostadpt_init(void)
 	hostadpt_in_size[0] = REG32(HOSTADPT_IN_MAX_CNT(0));
 	hostadpt_in_size[1] = REG32(HOSTADPT_IN_MAX_CNT(1));
 #endif
-	/* EN7523 boots before mt7915 sets up the host rings. A blocking
-	 * wait here prevents core0_main() from advancing to its idle loop. */
 #ifdef EN7523
-	if (!REG32(HOSTADPT_RX_DMA_PTR) || !REG32(HOSTADPT_TX_DMA_PTR))
-		return -1;
+	/* mt76 may publish one band before the other.  No global wait and no
+	 * premature activation; the SET_WAIT_NPU_INIT_DONE handler enables
+	 * each ring only after the host has initialized its descriptors. */
+	return en7523_hostadpt_ready ? 0 : -1;
 #else
 	while (REG32(HOSTADPT_RX_DMA_PTR) == 0)
 		;
-#endif
-
 	hostadpt_tx_ring_base = (REG32(HOSTADPT_TX_DMA_PTR) & 0x3FFFFFFF) | 0x40000000;
 	hostadpt_rx_ring_base = (REG32(HOSTADPT_RX_DMA_PTR) & 0x3FFFFFFF) | 0x40000000;
 	hostadpt_tx_ring_ready = 1;
 	return 0;
+#endif
 }
 
 #ifdef HAS_WIFI
@@ -68,7 +116,7 @@ int hostadpt_init(void)
 
 static void host_ring_write_desc(u32 desc_addr, u32 buf_addr, u16 pkt_len,
 				 u16 wcid, u8 amsdu, u8 fwd_type,
-				 u16 orig_len, u8 is_last, u32 info)
+				 u16 orig_len, u8 is_last, u32 info, u32 band)
 {
 	/* word 0 carries the ready bit: store it last */
 	volatile u32 *d = (volatile u32 *)desc_addr;
@@ -86,11 +134,21 @@ static void host_ring_write_desc(u32 desc_addr, u32 buf_addr, u16 pkt_len,
 			(*(u32 *)(counter_base_tri + 0x30))++;
 	}
 
+#ifdef EN7523
+	/* v1 uses a per-band DMA copy channel; channel 3 is the AN75xx
+	 * convention and is not owned by the EN7523 WiFi RX workers. */
+	bridge_dma_copy(band, buf_addr, d[3], dma_len);
+#else
 	bridge_dma_copy(3, buf_addr, d[3], dma_len);
+#endif
 
 	d[2] = info;
 	d[1] = (wcid & 0xFFFF) | ((amsdu & 0x1F) << 16) |
 	       ((fwd_type & 0x3F) << 26);
+#ifdef EN7523
+	/* Payload and metadata must be visible before the ready bit. */
+	__asm__ volatile("fence iorw, iorw" ::: "memory");
+#endif
 	d[0] = 1 | ((orig_len & 0x3FFF) << 1) | ((pkt_len & 0x3FFF) << 15) |
 	       ((is_last & 1) << 29);
 
@@ -104,6 +162,10 @@ int host_ring_submit(u32 buf_addr, u16 pkt_len, u32 band,
 {
 	u32 idx, check_idx, ring_base, desc_addr;
 
+#ifdef EN7523
+	if (!hostadpt_rx_ready(band))
+		return -1;
+#endif
 	if (wifi_debug_flags & 4) {
 		u32 *ctr;
 		if (band == 1)
@@ -118,7 +180,11 @@ int host_ring_submit(u32 buf_addr, u16 pkt_len, u32 band,
 	if (band == 0) {
 		idx = REG32(HOSTADPT_RX_DMA_IDX(0));
 		ring_base = hostadpt_tx_ring_base;
-
+#ifdef EN7523
+		if (idx >= HOSTADPT_RING_SIZE || !ring_base ||
+		    (*(volatile u32 *)(ring_base + idx * 24) & 1u))
+			return -1;
+#endif
 		check_idx = idx + 2;
 		if (check_idx > 511)
 			check_idx = idx - 510;
@@ -136,15 +202,22 @@ int host_ring_submit(u32 buf_addr, u16 pkt_len, u32 band,
 
 		desc_addr = ring_base + idx * 24;
 		host_ring_write_desc(desc_addr, buf_addr, pkt_len, wcid,
-				     amsdu, fwd_type, orig_len, is_last, info);
+				     amsdu, fwd_type, orig_len, is_last, info, band);
 		idx++;
+#ifdef EN7523
+		__asm__ volatile("fence iorw, iorw" ::: "memory");
+#endif
 		REG32(HOSTADPT_RX_DMA_IDX(0)) = (idx < HOSTADPT_RING_SIZE) ? idx : 0;
 		return 0;
 
 	} else if (band == 1) {
 		idx = REG32(HOSTADPT_RX_DMA_IDX(1));
 		ring_base = hostadpt_rx_ring_base;
-
+#ifdef EN7523
+		if (idx >= HOSTADPT_RING_SIZE || !ring_base ||
+		    (*(volatile u32 *)(ring_base + idx * 24) & 1u))
+			return -1;
+#endif
 		check_idx = idx + 2;
 		if (check_idx > 511)
 			check_idx = idx - 510;
@@ -162,8 +235,11 @@ int host_ring_submit(u32 buf_addr, u16 pkt_len, u32 band,
 
 		desc_addr = ring_base + idx * 24;
 		host_ring_write_desc(desc_addr, buf_addr, pkt_len, wcid,
-				     amsdu, fwd_type, orig_len, is_last, info);
+				     amsdu, fwd_type, orig_len, is_last, info, band);
 		idx++;
+#ifdef EN7523
+		__asm__ volatile("fence iorw, iorw" ::: "memory");
+#endif
 		REG32(HOSTADPT_RX_DMA_IDX(1)) = (idx < HOSTADPT_RING_SIZE) ? idx : 0;
 		return 0;
 

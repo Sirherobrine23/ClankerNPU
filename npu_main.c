@@ -274,20 +274,12 @@ static void __attribute__((noinline)) core0_main(void)
 	/* TODO run the tunnel dequeue here too */
 	eagle_core0_loop();
 #elif defined(EN7523)
-	/* Host rings are configured after the early NPU-version mailbox GET.
-	 * Keep hart 0 alive and defer hostadpt_init() until then. */
-	npu_printf("core0_main: EN7523 bridge init deferred; mailbox ready\n");
-	{
-		u32 hostadpt_initialized = 0;
-
-		for (;;) {
-			if (!hostadpt_initialized && hostadpt_init() == 0) {
-				hostadpt_initialized = 1;
-				npu_printf("EN7523: host adaptor initialized\n");
-			}
-			npu_dbg_poll();
-			delay_ms_mcycle(1);
-		}
+	/* The per-band mailbox START initializes hostadpt, so hart 0 must
+	 * stay available to service mt76 while PCIe publishes its rings. */
+	npu_printf("core0_main: EN7523 host adaptor waits for WLAN START\n");
+	for (;;) {
+		npu_dbg_poll();
+		delay_ms_mcycle(1);
 	}
 #else
 	npu_bridge_buf_init();

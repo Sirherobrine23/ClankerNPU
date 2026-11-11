@@ -115,6 +115,12 @@ int __attribute__((noinline)) tdma_tx_submit(u32 token, u32 pkt_len,
  * ================================================================ */
 
 extern volatile u8 hostadpt_tx_ring_ready;
+#ifdef EN7523
+int hostadpt_rx_init(u32 band);
+void hostadpt_rx_stop(u32 band);
+int hostadpt_rx_ready(u32 band);
+extern volatile u32 en7523_wifi_run[2];
+#endif
 #ifdef HAS_NPU_WIFI_TX
 extern u32 hostadpt_in_base[2];
 extern u32 hostadpt_in_size[2];
