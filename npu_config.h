@@ -103,6 +103,11 @@
 #define HAS_TUNNEL
 #endif
 
+/* EN7523 has a PPE mailbox ABI but not the AN758x tunnel engine. */
+#if defined(EN7523) || defined(HAS_TUNNEL)
+#define HAS_PPE
+#endif
+
 #if defined(AN7581) && defined(HAS_WIFI)
 #define HAS_TR471
 #endif

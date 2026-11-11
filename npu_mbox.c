@@ -207,8 +207,8 @@ void mailbox_init(void)
 #endif
 #endif
 
-#ifdef HAS_TUNNEL
-	callbacks[5] = (u32)(void *)hwnat_mail_dispatch;
+#ifdef HAS_PPE
+	callbacks[NPU_FUNC_PPE] = (u32)(void *)hwnat_mail_dispatch;
 #endif
 
 #ifdef HAS_DBA

@@ -392,8 +392,11 @@ void eagle_rx_refill_loop(void) __attribute__((noreturn));
 void eagle_core0_loop(void) __attribute__((noreturn));
 #endif
 
-/* npu_tunnel.c, npu_ppe.c, npu_l4s.c */
+/* npu_tunnel.c, npu_ppe.c, npu_ppe_en7523.c, npu_l4s.c */
 int tunnel_mail_dispatch(u32 base, u32 cnt);
+#ifdef HAS_PPE
+int hwnat_mail_dispatch(u32 base, u32 cnt);
+#endif
 #ifdef HAS_TUNNEL
 int tunnel_mail_store_hdr(u32 base, u32 cnt);
 int tunnel_mail_store_srv6(u32 base, u32 cnt);
@@ -406,7 +409,6 @@ int tunnel_mail_map_info(u32 base, u32 cnt);
 int tunnel_mail_l4s(u32 base, u32 cnt);
 int l4s_set_config(u32 cmd, u32 arg);
 void npu_bridge_debug(u32 op);
-int hwnat_mail_dispatch(u32 base, u32 cnt);
 void tunnel_init(void);
 s32 tunnel_dequeue(u32 port, u32 *pkt_len, u32 *desc_ptr);
 s32 tunnel_offload_handler(u32 port, u32 pkt_len, u32 *desc);
