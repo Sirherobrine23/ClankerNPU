@@ -41,9 +41,15 @@ int hostadpt_init(void)
 	hostadpt_in_size[0] = REG32(HOSTADPT_IN_MAX_CNT(0));
 	hostadpt_in_size[1] = REG32(HOSTADPT_IN_MAX_CNT(1));
 #endif
-	/* wait for host to configure RX DMA pointer */
+	/* EN7523 boots before mt7915 sets up the host rings. A blocking
+	 * wait here prevents core0_main() from advancing to its idle loop. */
+#ifdef EN7523
+	if (!REG32(HOSTADPT_RX_DMA_PTR) || !REG32(HOSTADPT_TX_DMA_PTR))
+		return -1;
+#else
 	while (REG32(HOSTADPT_RX_DMA_PTR) == 0)
 		;
+#endif
 
 	hostadpt_tx_ring_base = (REG32(HOSTADPT_TX_DMA_PTR) & 0x3FFFFFFF) | 0x40000000;
 	hostadpt_rx_ring_base = (REG32(HOSTADPT_RX_DMA_PTR) & 0x3FFFFFFF) | 0x40000000;

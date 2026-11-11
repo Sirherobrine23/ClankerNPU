@@ -46,7 +46,7 @@ static int wifi_mail_exceed(u32 *msg, u32 type)
 {
 	npu_printf("Error: exceed max num!interfaceid=%u wifi_mail_data->funcType=%u wifi_mail_data->funcId=%u\n",
 		   msg[0] & 0xF, type, msg[1]);
-	return 0;
+	return NPU_MBOX_EOPNOTSUPP;
 }
 
 static int wifi_mail_call(wifi_mail_fn_t fn, u32 *msg, const char *op)
@@ -54,7 +54,7 @@ static int wifi_mail_call(wifi_mail_fn_t fn, u32 *msg, const char *op)
 	int ret;
 
 	if (!fn)
-		return 1;
+		return NPU_MBOX_EOPNOTSUPP;
 	ret = fn(msg);
 	if (!(u16)ret)
 		npu_printf("wifi_mail_%s_operation fail !\n", op);
@@ -64,41 +64,64 @@ static int wifi_mail_call(wifi_mail_fn_t fn, u32 *msg, const char *op)
 /* MFUNC_WIFI: msg[0] bits 7:4 funcType, bits 3:0 interface; msg[1] funcId */
 int wifi_mail_dispatch(u32 base, u32 cnt)
 {
-	u32 *msg = (u32 *)((base & 0x3FFFFFFF) | NPU_ADDR_MASK);
-	u32 func_type = (msg[0] >> 4) & 0xF;
+	u32 *msg;
+	u32 func_type;
 
-	(void)cnt;
-#ifdef NPU_MAIL_TRACE
-	if (func_type != 3 || msg[1] != 0)
-		npu_printf("[MAIL]t%d f%d i%d %x %x %x\n", func_type, msg[1],
-			   msg[0] & 0xF, msg[2], msg[3], msg[4]);
+#ifdef EN7523
+	/* EN7523 v1 accesses the host's DRAM physical address directly.
+	 * Do not use the AN75xx 0x40000000 alias for MBQ0 DMA payloads. */
+	if ((base & 3u) || base < 0x80000000u || base >= 0xC0000000u ||
+	    cnt < 3 * sizeof(u32) || cnt > 0xC0000000u - base)
+		return NPU_MBOX_EINVAL;
+	msg = (u32 *)base;
+#else
+	if (!base || (base & 3u) || cnt < 3 * sizeof(u32))
+		return NPU_MBOX_EINVAL;
+	msg = (u32 *)((base & 0x3FFFFFFFu) | NPU_ADDR_MASK);
 #endif
-	NDBG_TRACE(NDBG_WIFI, func_type << 8 | (msg[1] & 0xFF), msg[2], msg[3]);
+
+	func_type = (msg[0] >> 4) & 0xF;
+#ifdef EN7523
+	/* v1 ABI: these commands consume more than the 3-word header.
+	 * Validate before passing the buffer to handlers. */
+	if (func_type == NPU_OP_SET &&
+	    ((msg[1] == WLAN_FUNC_SET_WAIT_ARHT_CHIP_INFO && cnt < 40) ||
+	     (msg[1] == WLAN_FUNC_SET_WAIT_BA_WIN_SIZE && cnt < 24)))
+		return NPU_MBOX_EINVAL;
+	if (func_type == NPU_OP_GET &&
+	    msg[1] == WLAN_FUNC_GET_WAIT_DBG_COUNTER && cnt < 24)
+		return NPU_MBOX_EINVAL;
+#endif
+
+#ifdef NPU_MAIL_TRACE
+	if (func_type != NPU_OP_GET || msg[1] != 0)
+		npu_printf("[MAIL]t%d f%d i%d %x %x %x\n", func_type, msg[1],
+			   msg[0] & 0xF, msg[2], cnt >= 16 ? msg[3] : 0,
+			   cnt >= 20 ? msg[4] : 0);
+#endif
+	NDBG_TRACE(NDBG_WIFI, func_type << 8 | (msg[1] & 0xFF),
+		   msg[2], cnt >= 16 ? msg[3] : 0);
 	switch (func_type) {
 	case NPU_OP_SET:
 		if (msg[1] >= WLAN_FUNC_SET_WAIT_MAX)
 			return wifi_mail_exceed(msg, 1);
-
 		return wifi_mail_call(set_wait_func_table[msg[1]], msg, "set_wait");
 	case NPU_OP_SET_NO_WAIT:
 		/* no set_nowait handler is installed */
 		if (msg[1])
 			return wifi_mail_exceed(msg, 2);
-
 		return wifi_mail_call(NULL, msg, "set_nowait");
 	case NPU_OP_GET:
 		if (msg[1] >= WLAN_FUNC_GET_WAIT_MAX)
 			return wifi_mail_exceed(msg, 3);
-
 		return wifi_mail_call(get_wait_func_table[msg[1]], msg, "get_wait");
 	case NPU_OP_GET_NO_WAIT:
 		if (msg[1])
 			return wifi_mail_exceed(msg, 4);
-
 		return wifi_mail_call(NULL, msg, "get_nowait");
 	default:
-		npu_printf("not support unknow funcType\n");
-		return 1;
+		npu_printf("not support unknown funcType\n");
+		return NPU_MBOX_EINVAL;
 	}
 }
 #endif /* HAS_WIFI */
@@ -130,7 +153,9 @@ static void kite_node_drain_loop(void)
 void core0_wifi_init_wrapper(void)
 {
 #ifdef HAS_WIFI
+#ifndef EN7523
 	int result;
+#endif
 
 #ifdef WIFI_KITE
 	/* no TDMA rx ring on kite */
@@ -170,9 +195,15 @@ void core0_wifi_init_wrapper(void)
 #endif
 	eagle_init_done = 1;
 #endif
+#ifdef EN7523
+	/* Host RX DMA pointers are programmed after the early version query.
+	 * Never block hart 0 here: it must remain available for mailbox IRQs. */
+	npu_printf("EN7523: host adaptor deferred until host rings are ready\n");
+#else
 	result = hostadpt_init();
 	if (result != 0)
 		npu_printf("Error: there is something wrong with hostadpt\n");
+#endif
 #if defined(AN7552) && defined(WIFI_KITE)
 	/* no core 3: core 0 feeds the host */
 	kite_node_drain_loop();

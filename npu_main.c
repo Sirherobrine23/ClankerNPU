@@ -120,17 +120,44 @@ static void npu_banner(void)
 /* A slot runs when its PC is ever nonzero; one that never fetched reads 0. */
 static void npu_core_probe(void)
 {
-	u32 en = REG32(CR_CORE_BOOT_CONFIG) & 0xFF, live = 0, c, i;
+	u32 en, live = 0, c, i;
+#ifdef EN7523
+	u32 waited, expected = (1u << MAX_CORE_NUM) - 1;
 
+	/* The NPU v1 host boots hart 0, then releases harts 1..3 one at
+	 * a time (normally 100 ms apart). Unlike the v2 all-at-once boot,
+	 * the initial mask and other harts' PC registers are not yet ready
+	 * when hart 0 reaches this check. Follow the v1 Clanker wait path.
+	 * The kernel still owns BOOT_CONFIG/BOOT_TRIGGER: the firmware must
+	 * never race it by attempting to release or reset other harts.
+	 */
+	for (waited = 0; waited < 500; waited++) {
+		if ((REG32(CR_CORE_BOOT_CONFIG) & expected) == expected &&
+		    REG32(NPU_CSR_PC(MAX_CORE_NUM - 1)) != 0)
+			break;
+		delay_ms_mcycle(1);
+	}
+#endif
+	en = REG32(CR_CORE_BOOT_CONFIG) & 0xFF;
 	for (c = 0; c < NPU_CLUSTER_SLOTS; c++)
 		for (i = 0; i < 4 && !(live & (1u << c)); i++)
 			if (REG32(NPU_CSR_PC(c)) != 0)
 				live |= 1u << c;
+#ifdef EN7523
+	npu_printf("EN7523 v1 boot: waited %d ms for host core release\n",
+		   waited);
+#endif
 	npu_printf("NPU cluster %x: cores enabled %x, running %x\n",
 		   REG32(CR_CLUSTER_VERSION), en, live);
+#ifdef EN7523
+	if ((en & expected) != expected || (live & expected) != expected)
+		npu_printf("Error: %d cores expected, enabled %x, PC-active %x\n",
+			   MAX_CORE_NUM, en, live);
+#else
 	if (live != (1u << MAX_CORE_NUM) - 1)
 		npu_printf("Error: %d cores expected, running %x\n",
 			   MAX_CORE_NUM, live);
+#endif
 }
 
 /* Fixed pass of mul, mulhu, divu, remu and a stack walk; the
@@ -246,6 +273,22 @@ static void __attribute__((noinline)) core0_main(void)
 #elif defined(AN7552) && defined(WIFI_EAGLE)
 	/* TODO run the tunnel dequeue here too */
 	eagle_core0_loop();
+#elif defined(EN7523)
+	/* Host rings are configured after the early NPU-version mailbox GET.
+	 * Keep hart 0 alive and defer hostadpt_init() until then. */
+	npu_printf("core0_main: EN7523 bridge init deferred; mailbox ready\n");
+	{
+		u32 hostadpt_initialized = 0;
+
+		for (;;) {
+			if (!hostadpt_initialized && hostadpt_init() == 0) {
+				hostadpt_initialized = 1;
+				npu_printf("EN7523: host adaptor initialized\n");
+			}
+			npu_dbg_poll();
+			delay_ms_mcycle(1);
+		}
+	}
 #else
 	npu_bridge_buf_init();
 	npu_printf("%s\n", "core0_main");
@@ -651,7 +694,8 @@ void npu_init(void)
 	}
 
 #ifdef EN7523
-	/* Native sources are enabled only after shared setup is published. */
+	/* Every EN7523 hart receives its own mailbox IRQ (source 8 + hart).
+	 * The shared callback table must be published before enabling IRQs. */
 	plic_register_isr(8 + hart, mbox_isr);
 	if (hart == 2)
 		plic_register_isr(18, timer_isr);
