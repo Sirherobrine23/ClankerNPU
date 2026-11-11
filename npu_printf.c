@@ -198,10 +198,11 @@ static void uart_putc(char c)
 
 static void uart_puts_raw(const char *s)
 {
-	while (*s) {
-		uart_putc(*s);
-		if (*s++ == '\n')
+	for (; *s; s++) {
+		/* Linux push 0x0D|\r fist of 0x0a|\n */
+		if (*s == '\n')
 			uart_putc('\r');
+		uart_putc(*s);
 	}
 }
 
