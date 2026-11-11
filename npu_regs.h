@@ -341,6 +341,17 @@ enum airoha_npu_wlan_chip {
 	AIROHA_NPU_WLAN_MT7990,
 	AIROHA_NPU_WLAN_MT7992,
 	AIROHA_NPU_WLAN_MT7996,
+
+	AIROHA_NPU_WLAN_MAX,
+};
+
+static const char* wlan_chips_names[AIROHA_NPU_WLAN_MAX] = {
+	[AIROHA_NPU_WLAN_MT7915] = "mt7915",
+	[AIROHA_NPU_WLAN_MT7915_DBDC] = "mt7915 dbdc",
+	[AIROHA_NPU_WLAN_MT7916] = "mt7916",
+	[AIROHA_NPU_WLAN_MT7990] = "mt7990",
+	[AIROHA_NPU_WLAN_MT7992] = "mt7992",
+	[AIROHA_NPU_WLAN_MT7996] = "mt7996",
 };
 
 /* Wire IDs match Linux include/linux/soc/airoha/airoha_offload.h. */

@@ -107,8 +107,13 @@ wifi_mail_fn_t get_wait_func_table[WLAN_FUNC_GET_WAIT_MAX] __attribute__((sectio
 	[WLAN_FUNC_GET_WAIT_NPU_VERSION] = wifi_mail_get_npu_version,
 };
 
+int wifi_mail_set_whnat_init(u32 *msg) {
+	npu_printf("Not implemented yet\n");
+	return NPU_MBOX_SUCCESS;
+}
+
 wifi_mail_fn_t set_wait_func_table[WLAN_FUNC_SET_WAIT_MAX] __attribute__((section(".data"))) = {
-	[WLAN_FUNC_SET_WAIT_HWNAT_INIT] = NULL,
+	[WLAN_FUNC_SET_WAIT_HWNAT_INIT] = wifi_mail_set_whnat_init,
 	[WLAN_FUNC_SET_WAIT_TX_BUF_CHECK_ADDR] = NULL,
 	[WLAN_FUNC_SET_WAIT_TOKEN_ID_SIZE] = NULL,
 #ifdef WIFI_KITE

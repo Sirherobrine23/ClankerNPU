@@ -267,7 +267,7 @@ static u32 wifi_pcie_desc_offset(u32 base, u32 type)
 /* WiFi get DBDC mode from driver model */
 static u8 wifi_get_dbdc_mode(u8 model)
 {
-	if (model == 1 || model == 2) {
+	if (model == AIROHA_NPU_WLAN_MT7915_DBDC || model == AIROHA_NPU_WLAN_MT7916) {
 		npu_printf("DriverModel(%d) %s Support DBDC\n", model, "");
 		return 1;
 	}
@@ -282,7 +282,7 @@ static u8 wifi_get_band_cap(u8 model)
 	u32 variant = (REG32(CHIP_VARIANT_REG) & 0xF) |
 		      ((REG32(CHIP_VARIANT_REG) >> 3) & 0x10);
 
-	if (model != 0) {
+	if (!(model == AIROHA_NPU_WLAN_NONE || model == AIROHA_NPU_WLAN_MT7915)) {
 		if (chip_rev == 15 && variant == 1) {
 			npu_printf("Chip id(%x) does not support "
 				   "NPU Wifi Offload!!!\n", variant);
@@ -470,8 +470,12 @@ void __attribute__((noinline)) npu_set_dram_ba_node_addr(u32 val)
 
 void __attribute__((noinline)) npu_set_driver_model(u32 val)
 {
+	const char* name = wlan_chips_names[val];
+	if (!name)
+		name = "<none>";
+
 	wifi_driver_model = (u8)val;
-	npu_printf("driverModel=%d\n", val);
+	npu_printf("driverModel=%s (%d)\n", name, val);
 }
 
 void __attribute__((noinline)) npu_set_band0_on_cpu(u32 val)
