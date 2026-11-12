@@ -201,8 +201,15 @@ static inline void wifi_cnt_inc(u32 band, u32 off)
 /* NPU view of a buffer in the host packet buffer */
 static NPU_INLINE u32 wifi_pkt_va(u32 buf_id)
 {
+#ifdef EN7523
+	/* The EN7523 RV32 accesses host packet DRAM through its physical
+	 * 0x8xxxxxxx address, like the v1 WiFi RX and MBQ0 paths.  The
+	 * AN75xx 0x4xxxxxxx alias is not the EN7523 packet view. */
+	return wifi_pkt_buf_addr + (buf_id << 12);
+#else
 	return ((wifi_pkt_buf_addr & 0x3FFFFFFF) | 0x40000000) +
 	       (buf_id << 12);
+#endif
 }
 
 /* bus address of a buffer, for the WiFi DMA and the host adaptor */

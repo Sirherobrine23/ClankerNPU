@@ -794,6 +794,18 @@ static void kite_rx_5g(void)
 	if (old == -1)
 		return;
 
+#ifdef EN7523
+	/* One-shot checkpoint before the first dereference of packet data.
+	 * If a trap follows, the RV32 trap block records mcause/mepc/mtval. */
+	{
+		static u32 traced_class_enter;
+
+		if (!traced_class_enter++)
+			npu_printf("[RXTRACE] 5g ENTER id=%d len=%lu va=%08lx fast=%u\n",
+				   old, len, wifi_pkt_va((u32)old),
+				   kite_fast_flag() & 1u);
+	}
+#endif
 	/* no classifier core on AN7552: always classify here */
 	if (MAX_CORE_NUM <= 2 || !(kite_fast_flag() & 1)) {
 		r = kite_rx_classify(old, len, 1);
