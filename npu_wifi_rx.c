@@ -156,30 +156,6 @@ static NPU_HOT NPU_INLINE int kite_rx_parse(u32 buf_id, struct kite_node *n, u32
 	return 0;
 }
 
-/* offset of the 802.3 frame for the no-BA test mode */
-static s32 kite_rx_hdr_len(u32 buf_id, u32 band)
-{
-	u32 buf = wifi_pkt_va(buf_id);
-	u32 w1 = *(u32 *)(buf + 4);
-	u32 len;
-
-	if (*(u32 *)(buf + 8) & 0x32000000) {
-		wifi_cnt_inc(band, 76);
-		return -1;
-	}
-	if (!(w1 & 0x4000))
-		return -1;
-
-	len = (w1 & 0x800) ? 56 : 40;
-	if (w1 & 0x1000)
-		len += 8;
-	if (w1 & 0x2000)
-		len += 8;
-	if (w1 & 0x8000)
-		len += 72;
-	return len;
-}
-
 /* ================================================================
  * BA reorder window classifier
  * ================================================================ */
@@ -203,16 +179,14 @@ static s32 kite_classify(s32 buf_id, u32 len, u32 band)
 	u32 sn, last, win, cnt;
 	u32 pool = 1;
 	u16 idx = 0xFFFF;
-	s32 hdr, fs;
+	s32 fs;
 
-	if (wifi_no_ba_test != 0) {
-		hdr = kite_rx_hdr_len(buf_id, band);
-		if (hdr == -1)
-			return buf_id;
-		/* the BSS is unknown here, pass 0 */
-		pkt_enqueue_bridge((u16)buf_id, len & 0xFFFF, hdr, band, 0);
-		return -1;
-	}
+	/* Diagnostic No-BA must not switch RX to TDMA or invent BSS 0.
+	 * Return the RXD to the existing raw host forwarding fallback.
+	 * Linux then performs BA reorder for the NPU queues.
+	 */
+	if (wifi_no_ba_test != 0)
+		return buf_id;
 
 	if (kite_rx_parse(buf_id, &pn, len, band) == -1)
 		return buf_id;
@@ -425,16 +399,12 @@ in_order:
 static NPU_HOT s32 kite_classify(s32 buf_id, u32 len, u32 band)
 {
 	struct kite_node pn;
-	s32 hdr;
 
-	if (wifi_no_ba_test != 0) {
-		hdr = kite_rx_hdr_len(buf_id, band);
-		if (hdr == -1)
-			return buf_id;
-		/* the BSS is unknown here, pass 0 */
-		pkt_enqueue_bridge((u16)buf_id, len & 0xFFFF, hdr, band, 0);
-		return -1;
-	}
+	/* No-BA: leave the BA engine bypassed, but preserve the normal
+	 * unclassified RXD -> host adaptor path for all received frames.
+	 */
+	if (wifi_no_ba_test != 0)
+		return buf_id;
 
 	if (kite_rx_parse(buf_id, &pn, len, band) == -1)
 		return buf_id;
