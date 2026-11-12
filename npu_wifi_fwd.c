@@ -81,7 +81,7 @@ void wifi_pkt_queue_init(u32 band)
  * Packet forwarding engine: 1 when the ring is full
  * ================================================================ */
 
-NPU_HOT int pkt_forward(u32 buf_id, u32 pkt_len, s16 wcid, u8 amsdu,
+static NPU_HOT int pkt_forward_inner(u32 buf_id, u32 pkt_len, s16 wcid, u8 amsdu,
 		u32 band, u8 fwd_type, u32 orig_len,
 		int classify_result, u8 tunnel)
 {
@@ -163,6 +163,18 @@ NPU_HOT int pkt_forward(u32 buf_id, u32 pkt_len, s16 wcid, u8 amsdu,
 	return 0;
 }
 
+NPU_HOT int pkt_forward(u32 buf_id, u32 pkt_len, s16 wcid, u8 amsdu,
+		u32 band, u8 fwd_type, u32 orig_len,
+		int classify_result, u8 tunnel)
+{
+	u32 begin = npu_stall_cycles();
+	int ret = pkt_forward_inner(buf_id, pkt_len, wcid, amsdu,
+				     band, fwd_type, orig_len,
+				     classify_result, tunnel);
+	NPU_STALL_RECORD(ST_FORWARD, begin, ret != 0);
+	return ret;
+}
+
 /* a frame the BME returned: hand it to the host */
 int pkt_forward_bme(s32 buf_id, u32 wcid, u32 info)
 {
@@ -184,6 +196,7 @@ void pinode_drain(u32 band)
 	u32 ring_size;
 	s32 buf_id;
 	int ret;
+	u32 begin;
 
 	if (band != 0) {
 		ridx = pinode_ridx_5g;
@@ -200,6 +213,7 @@ void pinode_drain(u32 band)
 		return;
 	}
 
+	begin = npu_stall_cycles();
 	wifi_cnt_inc(band == 1, 36);
 #ifdef EN7523
 	if (band == 1) {
@@ -260,6 +274,7 @@ void pinode_drain(u32 band)
 	else
 		pinode_ridx_2g = ridx;
 	wifi_cnt_inc(band == 1, 20);
+	NPU_STALL_RECORD(ST_PINODE, begin, 0);
 }
 
 static int rxnode_submit(u32 node, u32 band)
@@ -278,6 +293,7 @@ void rxnode_drain(u32 band)
 	u32 tries = 0, count = 0, submit = 0;
 	u32 cb = (band == 1);
 	u32 retry;
+	u32 begin;
 
 	if (band == 0) {
 		ridx = rxnode_ridx_2g;
@@ -292,6 +308,7 @@ void rxnode_drain(u32 band)
 		return;
 	}
 
+	begin = npu_stall_cycles();
 	/* find how many segments make the frame at ridx */
 	scan = ridx;
 	while (1) {
@@ -372,6 +389,7 @@ process:
 		rxnode_ridx_5g = ridx;
 	else
 		rxnode_ridx_2g = ridx;
+	NPU_STALL_RECORD(ST_RXNODE, begin, 0);
 }
 
 #endif /* WIFI_KITE */

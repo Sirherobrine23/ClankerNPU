@@ -17,6 +17,8 @@ NPUTX ?= 1
 NPUDBG ?= 0
 # 1 builds the profiler: section timers and PC sampling (docs/debug.md)
 PROF ?= 0
+# 1 measures blocking/waiting hot spots into SRAM (docs/stall-profile.md)
+STALLPROF ?= 1
 # 1 builds for the Clanker host drivers, this changes behaviour and might break with stock driver
 CLANKER ?= 0
 # git short hash in the boot version line; pin it to compare images
@@ -46,6 +48,7 @@ CFLAGS  := $(ARCH) -Os -ffunction-sections -fdata-sections \
            $(if $(filter 0,$(NPUTX)),-DEAGLE_NO_TX_PUSH) \
            $(if $(filter 1,$(NPUDBG)),-DNPU_DATAPATH_DBG) \
            $(if $(filter 1,$(PROF)),-DNPU_PROFILE) \
+           -DNPU_STALL_PROFILE \
            $(if $(filter 1,$(CLANKER)),-DUSE_CLANKER_DRIVER)
 ASFLAGS := $(ARCH) -D$(SOC) -D$(WIFI)
 LIBGCC  := $(shell $(CC) $(ARCH) -print-libgcc-file-name)
@@ -69,7 +72,7 @@ SRCS_S  := crt0.S
 # npu_globals.c must stay first: it is the only source of .data, so its
 # order fixes the layout of npu_data.bin.
 SRCS_C  := npu_globals.c \
-           npu_main.c npu_util.c npu_mutex.c npu_plic.c npu_timer.c \
+           npu_main.c npu_util.c npu_mutex.c npu_plic.c npu_timer.c npu_stall.c \
            npu_mbox.c npu_sram.c npu_bridge.c npu_printf.c \
            npu_dba.c npu_tr471.c npu_dbg.c \
            npu_wifi.c npu_wifi_bufid.c npu_wifi_fwd.c npu_wifi_ba.c \

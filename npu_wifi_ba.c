@@ -259,6 +259,7 @@ NPU_HOT void ba_indicate_le_seq(u32 *entry, u32 seq)
  * one released or 0xFFFF */
 NPU_HOT u32 ba_seq_scan(u32 *entry, u32 seq)
 {
+	u32 begin = npu_stall_cycles();
 	u8 band = *(u8 *)((u32)entry + 25);
 	u32 last = 0xFFFF;
 	u32 *mpdu;
@@ -274,6 +275,7 @@ NPU_HOT u32 ba_seq_scan(u32 *entry, u32 seq)
 			 *(u16 *)(entry[0] + 24) == ((last + 1) & 0xFFF));
 	}
 	ba_unlock(entry);
+	NPU_STALL_RECORD(ST_BA_SEQ, begin, 0);
 	return last;
 }
 
@@ -345,6 +347,7 @@ static NPU_HOT u32 *ba_band_entry(u32 band, u32 wcid, u32 tid)
 /* every 10 ticks from the rx loop */
 NPU_HOT void ba_timeout_scan(u32 band)
 {
+	u32 begin = npu_stall_cycles();
 	u32 now = KITE_TICK;
 	u32 max = wifi_dbdc_mode ? 300 : 150;
 	u32 wcid, tid;
@@ -357,6 +360,7 @@ NPU_HOT void ba_timeout_scan(u32 band)
 				ba_timeout_entry(e, now);
 		}
 	}
+	NPU_STALL_RECORD(ST_BA_TIMEOUT, begin, 0);
 }
 
 /* no rx buffer left: release everything the band holds */

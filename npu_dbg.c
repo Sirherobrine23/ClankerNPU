@@ -64,6 +64,9 @@ void npu_dbg_init(void)
 	ndbg_sym(i++, NDBG_TAG('M', 'B', 'O', 'X'), (u32)mbox_dispatch);
 	ndbg_sym(i++, NDBG_TAG('S', 'R', 'A', 'M'), (u32)sram_alloc_table);
 	ndbg_sym(i++, NDBG_TAG('T', 'I', 'C', 'K'), (u32)&timer_raw_tick);
+#ifdef NPU_STALL_PROFILE
+	ndbg_sym(i++, NDBG_TAG('S', 'T', 'A', 'L'), (u32)&npu_stall);
+#endif
 #ifdef HAS_TUNNEL
 	ndbg_sym(i++, NDBG_TAG('B', 'R', 'D', 'G'), (u32)&npu_bridge_base);
 	ndbg_sym(i++, NDBG_TAG('T', 'U', 'N', 'F'), (u32)tunnel_func_table);
@@ -183,6 +186,10 @@ static void ndbg_status(u32 mask)
 	if (mask & (1u << NDBG_SRAM))
 		npu_printf("[DBG] sram allocs %d used %x\n",
 			   ndbg->cnt[NC_SRAM_ALLOCS], sram_alloc_offset);
+#ifdef NPU_STALL_PROFILE
+	if (mask & (1u << NDBG_STATS))
+		npu_stall_dump();
+#endif
 }
 
 static u32 ndbg_csr(u32 idx, u32 *val)

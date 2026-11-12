@@ -33,6 +33,7 @@ CLANKERNPU_SOC = $(word 1,$(subst _, ,$(BUILD_VARIANT)))
 CLANKERNPU_WIFI = $(word 2,$(subst _, ,$(BUILD_VARIANT)))
 
 FW_MAKE_FLAGS_DEFAULT:=MAILTRACE=0 NPUDBG=1 PROF=0 RXPROF=1 NPUTX=1 CLANKER=0
+CLANKERNPU_STALLPROF ?= 0
 
 define Package/clanker-npu/Default
   SECTION:=firmware
@@ -71,6 +72,7 @@ define Build/Compile
 		SOC="$(CLANKERNPU_SOC)" \
 		WIFI="$(CLANKERNPU_WIFI)" \
 		$(or $(FW_MAKE_FLAGS_$(BUILD_VARIANT)),$(FW_MAKE_FLAGS_DEFAULT)) \
+		STALLPROF="$(CLANKERNPU_STALLPROF)" \
 		all
 endef
 

@@ -22,15 +22,18 @@ NPU_HOT int hw_mutex_lock(u32 *desc)
 	u32 off = (desc[0] * 4) & HW_MUTEX_OFF_MASK;
 	u32 hart = get_hartid();
 	u32 sts;
+	u32 begin = npu_stall_cycles();
+	int ret;
 
 	REG32(HW_MUTEX_ACQ(off)) = (hart << 8) | 0x40;
 	sts = REG32(HW_MUTEX_STATUS(hart, off));
-	if (!(sts & HW_MUTEX_HELD))
-		return -1;
+	ret = (sts & HW_MUTEX_HELD) && ((sts >> 8) & 0xFF) == hart ? 0 : -1;
 #ifdef EN7523
-	__asm__ volatile("fence iorw, iorw" ::: "memory");
+	if (!ret)
+		__asm__ volatile("fence iorw, iorw" ::: "memory");
 #endif
-	return ((sts >> 8) & 0xFF) == hart ? 0 : -1;
+	NPU_STALL_RECORD(ST_MUTEX, begin, ret != 0);
+	return ret;
 }
 
 NPU_HOT int hw_mutex_unlock(u32 *desc)
@@ -50,6 +53,8 @@ int hw_mutex_lock_pri(u32 *desc)
 	u32 off = (desc[0] * 4) & HW_MUTEX_OFF_MASK;
 	u32 hart = get_hartid();
 	u32 sts;
+	u32 begin = npu_stall_cycles();
+	int ret;
 
 	if (desc[1] != 0)
 		REG32(HW_MUTEX_PRI_ACQ(off)) = (hart << 8) | 0x10040;
@@ -57,12 +62,13 @@ int hw_mutex_lock_pri(u32 *desc)
 		REG32(HW_MUTEX_ACQ(off)) = (hart << 8) | 0x40;
 
 	sts = REG32(HW_MUTEX_STATUS(hart, off));
-	if (!(sts & HW_MUTEX_HELD))
-		return -1;
+	ret = (sts & HW_MUTEX_HELD) && ((sts >> 8) & 0xFF) == hart ? 0 : -1;
 #ifdef EN7523
-	__asm__ volatile("fence iorw, iorw" ::: "memory");
+	if (!ret)
+		__asm__ volatile("fence iorw, iorw" ::: "memory");
 #endif
-	return ((sts >> 8) & 0xFF) == hart ? 0 : -1;
+	NPU_STALL_RECORD(ST_MUTEX_PRI, begin, ret != 0);
+	return ret;
 }
 
 int hw_mutex_unlock_pri(u32 *desc)

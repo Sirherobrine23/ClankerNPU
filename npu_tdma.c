@@ -21,14 +21,18 @@
 void bridge_dma_copy(u32 channel, u32 src, u32 dst, u32 len)
 {
 	u32 mask = 1u << channel;
+	u32 begin = npu_stall_cycles(), wait;
 
 	REG32(DMA_COPY_SRC(channel)) = src;
 	REG32(DMA_COPY_DST(channel)) = dst;
 	REG32(DMA_COPY_CTRL(channel)) = (len << 16) | 0x23;
 
+	wait = npu_stall_cycles();
 	while (!(REG32(DMA_COPY_STATUS) & mask))
 		;
+	NPU_STALL_RECORD(ST_GDMA_WAIT, wait, 0);
 	REG32(DMA_COPY_STATUS) = mask;
+	NPU_STALL_RECORD(ST_GDMA_COPY, begin, 0);
 }
 #endif
 
@@ -641,7 +645,7 @@ static int __attribute__((noinline)) tdma_tx_submit_slow(u32 token,
 }
 
 /* makes no calls, so it saves no registers; word 0 is rebuilt whole */
-NPU_HOT int tdma_tx_submit(u32 token, u32 pkt_len, u32 buf_addr, u32 band)
+static NPU_HOT int tdma_tx_submit_inner(u32 token, u32 pkt_len, u32 buf_addr, u32 band)
 {
 	u32 base = (band != 0) ? tdma_tx_ring1_base : tdma_tx_ring0_base;
 	u32 sw_idx, next;
@@ -669,6 +673,15 @@ NPU_HOT int tdma_tx_submit(u32 token, u32 pkt_len, u32 buf_addr, u32 band)
 	tdma_tx_unlock();
 	return 0;
 }
+
+NPU_HOT int tdma_tx_submit(u32 token, u32 pkt_len, u32 buf_addr, u32 band)
+{
+	u32 begin = npu_stall_cycles();
+	int ret = tdma_tx_submit_inner(token, pkt_len, buf_addr, band);
+	NPU_STALL_RECORD(ST_TDMA_TX, begin, ret != 0);
+	return ret;
+}
+
 #elif defined(AN7581)
 /* AN7581, as the stock image's tdma_tx_submit: 32-byte descriptors,
  * word 1 done (bit 31) and length, word 2 the buffer, word 4 the token.

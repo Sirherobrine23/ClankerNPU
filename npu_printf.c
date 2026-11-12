@@ -289,6 +289,7 @@ int npu_printf(const char *fmt, ...)
 {
 	int len;
 	u32 mie;
+	u32 begin = npu_stall_cycles();
 	__builtin_va_list ap;
 
 	/* check if printing is suppressed by host */
@@ -330,6 +331,7 @@ int npu_printf(const char *fmt, ...)
 
 	hw_mutex_unlock_pri(printf_mutex_desc);
 	irq_restore(mie);
+	NPU_STALL_RECORD(ST_PRINTF, begin, 0);
 
 	return len;
 }

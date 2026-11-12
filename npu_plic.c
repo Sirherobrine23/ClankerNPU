@@ -94,10 +94,12 @@ void call_isr_by_src(u32 src)
 void plic_handle_irq(void)
 {
 	u32 hart = get_hartid(), src = csr_read(0x5c0) & 0x7f;
+	u32 begin = npu_stall_cycles();
 
 	ndbg->hart[hart].in_isr = 1;
 	call_isr_by_src(src);
 	ndbg->hart[hart].in_isr = 0;
+	NPU_STALL_RECORD(ST_PLIC_ISR, begin, 0);
 }
 
 #else

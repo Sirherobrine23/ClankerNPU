@@ -156,7 +156,7 @@ static void host_ring_write_desc(u32 desc_addr, u32 buf_addr, u16 pkt_len,
 		(*(u32 *)(counter_base_tri + 0x38))++;
 }
 
-int host_ring_submit(u32 buf_addr, u16 pkt_len, u32 band,
+static int host_ring_submit_inner(u32 buf_addr, u16 pkt_len, u32 band,
 			    u16 wcid, u8 amsdu, u8 fwd_type,
 			    u16 orig_len, u8 is_last, u32 info)
 {
@@ -247,6 +247,17 @@ int host_ring_submit(u32 buf_addr, u16 pkt_len, u32 band,
 		npu_printf("Ring Index error!\n");
 		return -1;
 	}
+}
+
+int host_ring_submit(u32 buf_addr, u16 pkt_len, u32 band,
+			    u16 wcid, u8 amsdu, u8 fwd_type,
+			    u16 orig_len, u8 is_last, u32 info)
+{
+	u32 begin = npu_stall_cycles();
+	int ret = host_ring_submit_inner(buf_addr, pkt_len, band, wcid,
+					amsdu, fwd_type, orig_len, is_last, info);
+	NPU_STALL_RECORD(ST_HOST_RING, begin, ret != 0);
+	return ret;
 }
 
 #ifdef HAS_ASYNC_COPY

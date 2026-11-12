@@ -190,6 +190,7 @@ s32 buf_id_alloc_ring(void)
 {
 	u16 next;
 	s32 id;
+	u32 begin = npu_stall_cycles();
 
 	hw_mutex_lock(rx_bufid_alloc_mutex);
 	next = (rx_bufid_ridx == BUFID_POOL_LAST) ? 0 : rx_bufid_ridx + 1;
@@ -197,6 +198,7 @@ s32 buf_id_alloc_ring(void)
 		if ((wifi_debug_flags & 4) && counter_base_tri)
 			(*(u32 *)(counter_base_tri + 0x20))++;
 		hw_mutex_unlock(rx_bufid_alloc_mutex);
+		NPU_STALL_RECORD(ST_BUFID_ALLOC, begin, 1);
 		return -1;
 	}
 	rx_bufid_alloc_count++;
@@ -205,6 +207,7 @@ s32 buf_id_alloc_ring(void)
 	id = *(s16 *)(bufid_pool_base + 2 * (u32)rx_bufid_ridx);
 	rx_bufid_ridx = next;
 	hw_mutex_unlock(rx_bufid_alloc_mutex);
+	NPU_STALL_RECORD(ST_BUFID_ALLOC, begin, id < 0);
 	return id;
 }
 

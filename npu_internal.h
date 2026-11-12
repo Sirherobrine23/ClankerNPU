@@ -4,6 +4,7 @@
 #include "npu_config.h"
 #include "npu_types.h"
 #include "npu_regs.h"
+#include "npu_stall.h"
 
 /* per-packet code: one contiguous block stays inside the 8 KB
  * instruction cache (HAS_HOT_TEXT) */

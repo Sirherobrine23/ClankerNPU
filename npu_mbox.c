@@ -224,6 +224,7 @@ int mbox_notify_host(u32 core_id, u32 func_id, u32 len)
 {
 	u32 timeout = 30;
 	u32 sts;
+	u32 begin = npu_stall_cycles();
 
 	hw_mutex_lock_pri(mbox_notify_mutex);
 
@@ -243,5 +244,6 @@ int mbox_notify_host(u32 core_id, u32 func_id, u32 len)
 			   "npuMbox_notify_host", core_id, func_id);
 
 	hw_mutex_unlock_pri(mbox_notify_mutex);
+	NPU_STALL_RECORD(ST_MBOX_NOTIFY, begin, !(sts & 2));
 	return (sts & 2) ? (sts >> 2) & 7 : 0;
 }
