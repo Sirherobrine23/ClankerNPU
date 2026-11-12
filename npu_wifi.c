@@ -136,6 +136,11 @@ static void kite_node_drain_loop(void)
 		if (rxd_5g_init_done != 0) {
 #ifdef EN7523
 			if (en7523_wifi_run[AIROHA_WLAN_BAND_5G] && hostadpt_rx_ready(AIROHA_WLAN_BAND_5G)) {
+				static u32 first_drain_5g;
+				if (!first_drain_5g) {
+					first_drain_5g = 1;
+					npu_printf("[RXTRACE] core3 5g host-drain running\n");
+				}
 				rxnode_drain(1);
 				pinode_drain(1);
 			}

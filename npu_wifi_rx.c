@@ -717,6 +717,25 @@ static void kite_rx_5g(void)
 	n = kite_rx_frame(ring, &ridx, &len, 1);
 	if (n == 0)
 		return;
+#ifdef EN7523
+	/* First actual DDONE only: identify whether WFDMA produced an RXD.
+	 * Debug-only, one line per boot; never log from the hot loop. */
+	{
+		static u32 first_rx_5g;
+
+		if (!first_rx_5g) {
+			first_rx_5g = 1;
+			u32 d = ring + ridx * 16;
+
+			npu_printf("[RXTRACE] 5g DDONE: idx=%lu n=%lu len=%lu w0=%08lx w1=%08lx w2=%08lx radio_cpu=%08lx radio_dma=%08lx\n",
+				   ridx, n, len, *(volatile u32 *)d,
+				   *(volatile u32 *)(d + 4),
+				   *(volatile u32 *)(d + 8),
+				   REG32(pcie_base_5g + 8),
+				   REG32(pcie_base_5g + 12));
+		}
+	}
+#endif
 
 	if (len - 504 <= 16)
 		wifi_cnt_inc(1, 0xF0);
@@ -726,6 +745,15 @@ static void kite_rx_5g(void)
 		wifi_cnt_inc(1, 0xF8);
 
 	if (n != 1) {
+#ifdef EN7523
+		{
+			static u32 traced_multi;
+
+			if (!traced_multi++)
+				npu_printf("[RXTRACE] 5g MULTI n=%lu len=%lu ridx=%lu\n",
+					   n, len, rxd_5g_cpu_idx);
+		}
+#endif
 		next = kite_rx_multi(1, rxd_5g_cpu_idx, len, n);
 		*(u32 *)(pcie_base_5g + 8) = next ? next - 1 :
 					     KITE_RX_RING_LAST;
@@ -750,6 +778,15 @@ static void kite_rx_5g(void)
 		rxd_5g_cpu_idx = next;
 	}
 
+#ifdef EN7523
+	{
+		static u32 traced_rearm;
+
+		if (!traced_rearm++)
+			npu_printf("[RXTRACE] 5g REARM ridx=%lu next=%lu old=%d new=%d len=%lu\n",
+				   ridx, next, old, id, len);
+	}
+#endif
 	/* give the chip the consumed descriptors every 128 frames */
 	if (next != 0 && ((next - 1) & 127) == 0)
 		*(u32 *)(pcie_base_5g + 8) = next - 1;
@@ -760,6 +797,15 @@ static void kite_rx_5g(void)
 	/* no classifier core on AN7552: always classify here */
 	if (MAX_CORE_NUM <= 2 || !(kite_fast_flag() & 1)) {
 		r = kite_rx_classify(old, len, 1);
+#ifdef EN7523
+		{
+			static u32 traced_class;
+
+			if (!traced_class++)
+				npu_printf("[RXTRACE] 5g CLASS old=%d len=%lu result=%d fast=%u\n",
+					   old, len, r, kite_fast_flag() & 1u);
+		}
+#endif
 		if (r == -1)
 			return;
 		if (pkt_forward(old, len & 0xFFFF, 0, 0, 1, 2, len & 0xFFFF,
@@ -773,6 +819,15 @@ static void kite_rx_5g(void)
 #if MAX_CORE_NUM > 2
 	/* pipeline mode: core 2 classifies */
 	slot = (volatile u32 *)(wifi_pipeline_base + wifi_pipeline_widx * 8);
+#ifdef EN7523
+	{
+		static u32 traced_pipeline;
+
+		if (!traced_pipeline++)
+			npu_printf("[RXTRACE] 5g PIPE old=%d len=%lu widx=%u slot=%08lx\n",
+				   old, len, wifi_pipeline_widx, *slot);
+	}
+#endif
 	if (*slot != (u32)-1) {
 		npu_printf("%s(1) Enter PushIndex1 %d\n",
 			   "pipeline1_pkt_enqueue", wifi_pipeline_widx);
@@ -872,6 +927,15 @@ static void __attribute__((noreturn)) kite_pipeline_worker(void)
 		*(volatile u16 *)(slot + 1) = 0;
 
 		r = kite_classify(id, len, 1);
+#ifdef EN7523
+		{
+			static u32 traced_worker;
+
+			if (!traced_worker++)
+				npu_printf("[RXTRACE] 5g WORK id=%d len=%u result=%d\n",
+					   id, len, r);
+		}
+#endif
 		/* back to the buffer manager */
 		if (r != -1 &&
 		    pkt_forward((s16)id, len, 0, 0, 1, 1, len, r, 0) != 0) {

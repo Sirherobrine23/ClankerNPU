@@ -201,6 +201,17 @@ void pinode_drain(u32 band)
 	}
 
 	wifi_cnt_inc(band == 1, 36);
+#ifdef EN7523
+	if (band == 1) {
+		static u32 traced_pinode;
+
+		if (!traced_pinode++)
+			npu_printf("[RXTRACE] 5g PINODE ridx=%u id=%d len=%u flags=%02x\n",
+				   ridx, (s32)entry[0],
+				   *(u16 *)((u32)entry + 6),
+				   *(u8 *)((u32)entry + 10));
+	}
+#endif
 
 	buf_id = (s32)entry[0];
 	if (buf_id < 0) {
@@ -218,6 +229,22 @@ void pinode_drain(u32 band)
 				       (*(u8 *)((u32)entry + 10) >> 1) & 1,
 				       *(u8 *)((u32)entry + 12));
 		wifi_cnt_inc(band == 1, ret ? 108 : 48);
+#ifdef EN7523
+		/* This is the first real frame accepted by the host-drain core.
+		 * Trace failures and successes once, without flooding UART. */
+		if (band == 1) {
+			static u32 first_host_5g;
+
+			if (!first_host_5g) {
+				first_host_5g = 1;
+				npu_printf("[RXTRACE] 5g HOST: buf=%lu len=%u submit=%d host_dma_idx=%08lx host_cpu_idx=%08lx\n",
+					   (u32)buf_id,
+					   *(u16 *)((u32)entry + 6), ret,
+					   REG32(HOSTADPT_RX_DMA_IDX(1)),
+					   REG32(HOSTADPT_RX_CPU_IDX(1)));
+			}
+		}
+#endif
 		buf_id_free(0, band, *(u16 *)entry);
 	}
 

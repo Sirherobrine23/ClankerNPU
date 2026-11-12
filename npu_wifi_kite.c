@@ -259,6 +259,12 @@ int wifi_mail_set_init_done(u32 *msg)
 		return NPU_MBOX_ENODEV;
 	__asm__ volatile("fence iorw, iorw" ::: "memory");
 	en7523_wifi_run[band] = 1;
+	if (band == 1)
+		npu_printf("[RXTRACE] 5g START: rx_base=%08lx count=%lu radio_cpu=%08lx radio_dma=%08lx host_base=%08lx host_count=%lu\n",
+			   rxd_base_5g, REG32(pcie_base_5g + 4),
+			   REG32(pcie_base_5g + 8), REG32(pcie_base_5g + 12),
+			   REG32(HOSTADPT_RX_BASE_PTR(1)),
+			   REG32(HOSTADPT_RX_MAX_CNT(1)));
 	return NPU_MBOX_SUCCESS;
 #else
 	(void)msg;
