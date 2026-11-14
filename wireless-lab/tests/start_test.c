@@ -107,7 +107,7 @@ int main(void)
  assert(call(1,1,WLAN_FUNC_SET_WAIT_NPU_INIT_DONE,12)==NPU_MBOX_SUCCESS);
  assert(enables==3&&lab_started_mask==3);
  assert(call(3,0,WLAN_FUNC_GET_WAIT_NPU_VERSION,12)==NPU_MBOX_SUCCESS);
- assert(*(u32 *)(uintptr_t)0x85000008==NPU_VERSION_CODE(7,13,22));
+ assert(*(u32 *)(uintptr_t)0x85000008==NPU_VERSION_CODE(7,13,24));
  assert(cycle_reads>0);
  assert(call_arg(1,0,WLAN_FUNC_SET_WAIT_NPU_INIT_DONE,12,0)==NPU_MBOX_SUCCESS);
  assert(lab_started_mask==2 && !lab_band_started(0) && lab_band_started(1));

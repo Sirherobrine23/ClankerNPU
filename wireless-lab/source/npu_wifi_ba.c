@@ -83,7 +83,7 @@ NPU_HOT u32 reorder_node_alloc(u32 band, u32 *pool_type, u16 *idx_out)
 NPU_HOT int pkt_enqueue_bridge(u32 buf_id, u32 pkt_len, u32 hdr,
 		       u32 band, u32 bss)
 {
-	u32 size, tx_len;
+	u32 size, tx_len, stamp;
 	int ret;
 
 	if (ratelimit_table[band * 16 + bss] != 0) {
@@ -118,8 +118,10 @@ NPU_HOT int pkt_enqueue_bridge(u32 buf_id, u32 pkt_len, u32 hdr,
 	else if (size - 1512 <= 16)
 		wifi_cnt_inc(band, 96);
 
+	stamp=lab_prof_begin(LP_SUBMIT);
 	ret = tdma_tx_submit(buf_id, tx_len, wifi_pkt_va(buf_id) + 2 + hdr,
 			     band);
+	lab_prof_end(LP_SUBMIT,stamp,ret==0);
 	if (ret != 0)
 		buf_id_free(0, band, buf_id);
 	return ret;

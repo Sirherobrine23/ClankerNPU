@@ -14,6 +14,9 @@
 u32 wifi_pkt_buf_addr=PACKET;
 u8 wifi_debug_flags;
 volatile u32 lab_started_mask,lab_hwnat_enabled;
+#if LAB_PROFILE
+struct lab_profile_data lab_profile_live;
+#endif
 static u32 bump=0x1e800000,locks[64],checks;
 int hw_mutex_lock(u32 *p){assert(p[0]<16);assert(!locks[p[0]]);locks[p[0]]=1;return 0;}
 int hw_mutex_unlock(u32 *p){assert(locks[p[0]]);locks[p[0]]=0;return 0;}
@@ -64,6 +67,9 @@ int main(void)
  REG32(0x1fb54068)=1023u<<16;
  for(u32 i=0;i<8;i++)lab_qdma_poll();
  CHECK(lab_diag->error==0);CHECK(lab_diag->qdma_complete==1023);
+#if LAB_PROFILE
+ CHECK(lab_profile_live.q_peak==1023);CHECK(lab_profile_live.irq_peak==1023);CHECK(lab_profile_live.irq_budget>0);
+#endif
  CHECK(lab_diag->free_ids==5600-1023); /* completion must NOT free tokens */
  REG32(0x1fb50fe4)=1;
  for(u32 i=0;i<1023;i++){REG32(0x1fb50fe0)=0x10000|ids[i];lab_ppe_poll();}

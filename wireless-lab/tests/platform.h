@@ -27,6 +27,10 @@ extern u8 wifi_dbdc_mode,wifi_pcie_state[2];
 extern u32 ba_table_a,ba_table_b,wifi_dram_ba_node_addr;
 extern volatile u32 rxd_2g_init_done,rxd_5g_init_done;
 extern u32 rxd_base_2g,rxd_base_5g;
+extern u32 rxd_2g_flush_tick,rxd_5g_flush_tick;
+extern volatile u32 timer_slow_tick;
+extern u8 wifi_no_ba_test;
+#define KITE_TICK timer_slow_tick
 extern u32 wcid_counter_base_2g,wcid_counter_base_5g;
 int npu_printf(const char *fmt,...);
 u32 test_cycle(void);

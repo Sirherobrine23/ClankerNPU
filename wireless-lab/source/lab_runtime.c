@@ -3,6 +3,7 @@
 #include "npu_wifi.h"
 static volatile u32 boot_ok,backend_ready;
 static u32 last_ppe_report;
+static u32 profile_tick;
 extern volatile u32 lab_pause_request,lab_pause_ack[4];
 void lab_fault(u32 err,u32 cause,u32 pc,u32 val)
 {
@@ -39,6 +40,7 @@ void lab_stats_publish(void)
  REG32(NPU_MIB(28))=lab_diag->qdma_complete;
  REG32(NPU_MIB(29))=lab_diag->ppe_punt;
  REG32(NPU_MIB(30))=lab_diag->state;
+ if(++profile_tick%2u==0)lab_profile_report();
  /* At most once per status tick and only after another 2048 punts. */
  if((u32)(lab_diag->ppe_punt-last_ppe_report)>=2048u) {
   last_ppe_report=lab_diag->ppe_punt;
@@ -60,7 +62,7 @@ void lab_init(void)
  extern char __bss_end[];
  npu_printf("[WLAB] local_end=%x ndbg=%x rx_ready=%x/%x\n",
             (u32)__bss_end,(u32)NDBG_BASE,rxd_2g_init_done,rxd_5g_init_done);
- npu_printf("[WLAB] v7.13.22: data workers wait for WLAN START\n");
+ npu_printf("[WLAB] v7.13.24: data workers wait for WLAN START profile=%u sample=64 rx_batch=8 idle_skip=7\n",LAB_PROFILE);
  /* Kernel may start the NPU before Ethernet allocates its QDMA rings.
   * Keep the mailbox available and claim QDMA later from the RX worker. */
  if(!lab_diag->error){lab_diag->state=2;boot_ok=1;}
@@ -98,10 +100,23 @@ void lab_run(u32 hart)
     }
    }
    if(backend_ready && lab_any_started()) {
+#if LAB_PROFILE
+    u32 stamp,work;
+    work=lab_diag->qdma_complete;stamp=lab_prof_begin(LP_QDONE);
+    lab_qdma_poll();lab_prof_end(LP_QDONE,stamp,lab_diag->qdma_complete-work);
+    if(wifi_pkt_buf_addr){
+     work=lab_diag->ppe_free+lab_diag->ppe_punt;stamp=lab_prof_begin(LP_PPE);
+     lab_ppe_poll();lab_prof_end(LP_PPE,stamp,lab_diag->ppe_free+lab_diag->ppe_punt-work);
+     work=lab_diag->rx[0]+lab_diag->rx[1];stamp=lab_prof_begin(LP_RX);
+     lab_rx_poll();lab_prof_end(LP_RX,stamp,lab_diag->rx[0]+lab_diag->rx[1]-work);
+    }
+#else
     lab_qdma_poll();
     if(wifi_pkt_buf_addr){lab_ppe_poll();lab_rx_poll();}
+#endif
    }
   } else if(hart==3 && boot_ok && !lab_diag->error && lab_any_started())lab_host_poll();
+  if(hart==1)lab_profile_publish();
   if(lab_diag->error) __asm__ volatile("nop");
  }
 }

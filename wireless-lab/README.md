@@ -1,4 +1,4 @@
-# EN7523 Wireless Lab 7.13.22
+# EN7523 Wireless Lab 7.13.24
 
 Base Clanker `en7523_v2`: `50e92a1cc20629cb2e3fe8a5925e6d3fc9a4f65a`.
 OpenWrt conferido: `airha_npu`, `0179add735d627d1be6fc3ebbe5072617e86851a`.
@@ -35,8 +35,8 @@ em `0x1e85e000`. O alocador permanece limitado a `[0x1e800000,0x1e85e000)`.
 Assim, a região de debug deixa de usar a janela local suspeita de alias.
 
 O linker do Lab impõe um limite conservador de 16 KiB aos globais locais e
-verifica o endereço e o fim da página NDBG. O firmware atual ocupa 11296 bytes
-locais e termina em `0x1e902c20`. Esse limite de build não é uma conclusão
+verifica o endereço e o fim da página NDBG. O firmware atual ocupa 11308 bytes (perfil desligado)
+locais e termina em `0x1e902c2c`. Esse limite de build não é uma conclusão
 sobre a capacidade física total da NPU. O layout do build padrão é preservado.
 
 Não foi removida a validação que recusa trocar o pool com RX já inicializado.
@@ -69,11 +69,11 @@ make -j10 package/feeds/npu/ClankerNPU/compile \
 make -j10 CLANKERNPU_FW_IMPL=wireless-lab CLANKERNPU_LAB_CUSTOM_OPS=0 V=s
 ```
 
-Faça boot a frio com a imagem reconstruída e confira a versão `7.13.22`.
+Faça boot a frio com a imagem reconstruída e confira a versão `7.13.24`.
 No início deve aparecer:
 
 ```text
-[WLAB] local_end=1e902c20 ndbg=1e85f000 rx_ready=0/0
+[WLAB] local_end=1e902c2c ndbg=1e85f000 rx_ready=0/0
 ```
 
 Depois capture:
@@ -85,7 +85,7 @@ cat /sys/kernel/debug/airoha_npu/mib
 
 MIB16 deve passar a `0x84d00000` depois da configuração bem-sucedida do pool.
 Se falhar, a linha `[WLAB] reject` registra comando, argumento, RX e ACK.
-MIB19 desta versão é `0x574c3232`.
+MIB19 desta versão é `0x574c3234`.
 
 | MIB | Conteúdo |
 | --- | --- |
@@ -223,3 +223,68 @@ O log também contém aviso `SRAM size mismatch: wrote 7, read 6` e
 investigação caso o fluxo não entre em BND depois da correção de metadata.
 Não há promessa de taxa de transferência nem prova de aceleração apenas por
 MIB18=7. A confirmação exige tráfego e entradas BND correspondentes ao teste.
+
+
+## Perfilamento v23
+
+A v23 introduziu LAB_PROFILE=1 por padrão. Na v24, LAB_PROFILE=0 é o padrão;
+as sondas continuam disponíveis explicitamente com valor 1. O hart 1
+amostra uma chamada a cada 64 de qdone, ppe, rx, class, submit e alloc.
+CLASS/SUBMIT/ALLOC estão aninhados em RX; os tempos são inclusivos.
+Não se deve somar essas linhas como se fossem custos independentes.
+
+A leitura mcycle usa barreira de compilador e a subtração unsigned trata o wrap
+em medições curtas. Os contadores de ciclos são cumulativos de 32 bits;
+o relatório usa diferenças a cada aproximadamente dois segundos. Intervalos
+maiores que um wrap de mcycle (~12,9 s a 333 MHz) não têm tempo reconstruível.
+O máximo de cada estágio é desde o boot, não apenas da janela.
+
+O diagnóstico de perfil foi anexado ao fim da página Lab, mantendo o prefixo
+anterior. O hart 1 é o único escritor das estatísticas. Publica um snapshot
+com sequência a cada 4096 passes; o hart 0 tenta lê-lo até três vezes e pula
+uma publicação ocupada. Não há espera ilimitada do hart de controle.
+Não há impressão por pacote nem escrita UART do hart RX. O hart 0 imprime
+linhas [PROF] a cada aproximadamente dois segundos de atividade RX.
+
+QPEAK conta descritores submetidos sem completion, limitado a 1023; IRQPEAK e
+FIFOPEAK registram picos das filas de completion e retorno PPE. IRQCAP/FIFOCAP
+contam polls cujo backlog excedeu o orçamento 128. PEEK registra uma inspeção
+limitada aos próximos 16 descritores RX, uma a cada 64 polls de cada banda;
+16 significa pelo menos 16 descritores DDONE consecutivos, não ring cheio.
+FULL é a quantidade dessas inspeções que atingiu o limite. POLL/READY e NOBUF
+separam polls vazios, frames prontos e falhas de reposição de buffer.
+Picos são desde o boot; demais campos de pressão impressos são deltas da janela.
+
+LAB_PROFILE=0 desliga as sondas e os relatórios. No OpenWrt use
+CLANKERNPU_LAB_PROFILE=0, preservando FW_IMPL=wireless-lab e CUSTOM_OPS=0.
+O heartbeat cycles[hart] da v22 permanece inalterado para não misturar uma
+possível otimização do tráfego de diagnóstico com o experimento de medição.
+O perfilamento tem custo: compare os dois modos no mesmo cenário antes de
+interpretar uma diferença de throughput como um problema no datapath.
+
+
+## Lotes RX na v24
+
+O novo lab_rx_schedule.c chama o consumidor de um frame até consumir oito
+frames no total, alternando bandas produtivas. Entre lotes volta ao laço
+existente que atende QDMA/PPE. Um consumidor retorna 0 quando nenhum descritor
+foi consumido (ring vazio ou frame ainda incompleto) e 1 quando consumiu,
+inclusive se o pacote precisou ser descartado pelos caminhos existentes.
+
+Ao encontrar uma banda vazia/incompleta, pula até sete passagens seguintes;
+a oitava consulta novamente. Isso é um limite em passagens, não em microssegundos.
+A manutenção de BA foi movida para o escalonador e continua sendo atendida
+mesmo quando os polls de descritores dessa banda estão em backoff. O limite
+original de idade >9 ticks e o comportamento no modo sem BA são preservados.
+
+O escalonador verifica START, RX inicializado, pausa e erro fatal. Uma pausa
+ou erro observado entre frames encerra o lote. As duas bandas carregadas
+recebem quatro frames cada por lote completo; uma banda vazia não reserva
+créditos que impeçam a outra de consumir os oito frames. Não houve mudança
+de hart, ownership de buffers, formato host/QDMA ou instruções de cache.
+
+No modo de perfil opcional, a linha stage=rx passa a medir uma chamada do
+escalonador (até oito frames), enquanto class/submit/alloc seguem por frame.
+Use work para normalizar ciclos por frame, não a média por chamada RX da v23.
+O leitor profile-summary.py também passa a tolerar linhas UART incompletas,
+marcando missing/incomplete em vez de interromper com KeyError.

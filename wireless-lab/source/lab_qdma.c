@@ -60,6 +60,7 @@ int tdma_tx_submit(u32 token,u32 len,u32 address,u32 band)
  hw_mutex_lock(qlock);
  if (!avail) { lab_diag->qdma_full++; hw_mutex_unlock(qlock); irq_restore(irq); return -1; }
  idx=free_idx[head]; head=(head+1)&1023; avail--;
+ LAB_PROF_MAX(q_peak,NDESC-1-avail);
  if (idx>=NDESC || state[idx] || state[active]!=1) {
   lab_fault(4,0,0,idx); hw_mutex_unlock(qlock); irq_restore(irq); return -1;
  }
@@ -77,7 +78,8 @@ void lab_qdma_poll(void)
 {
  u32 n,done=0,irq;
  if (!ready || lab_diag->error) return;
- n=(QREG(0x68)>>16)&0xfff; if(n>128)n=128;
+ n=(QREG(0x68)>>16)&0xfff; LAB_PROF_MAX(irq_peak,n);
+ if(n>128){LAB_PROF_INC(irq_budget);n=128;}
  if(!n)return;
  irq=irq_save(); hw_mutex_lock(qlock);
  while(done<n) {
@@ -99,7 +101,8 @@ void lab_qdma_poll(void)
 void lab_ppe_poll(void)
 {
  u32 n=REG32(0x1fb50fe4)&0xffff;
- if(n>128)n=128;
+ LAB_PROF_MAX(fifo_peak,n);
+ if(n>128){LAB_PROF_INC(fifo_budget);n=128;}
  while(n-- && !lab_diag->error) {
   u32 v=REG32(0x1fb50fe0),id=v&0xffff;
   if((s32)v<0)break;

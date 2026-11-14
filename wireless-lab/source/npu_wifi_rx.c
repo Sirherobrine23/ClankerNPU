@@ -568,8 +568,31 @@ static NPU_INLINE u32 kite_rx_frame(u32 ring, u32 *ridx, u32 *len, u32 band)
 	return n;
 }
 
+#if LAB_PROFILE
+/* Call-site probes are hart-1 only; no buffer-manager cross-hart races. */
+static s32 lab_rx_alloc_profile(u32 band)
+{
+ u32 stamp=lab_prof_begin(LP_ALLOC);
+ s32 id=buf_id_alloc_hw(0,band);
+ lab_prof_end(LP_ALLOC,stamp,id!=-1);
+ if(id==-1)LAB_PROF_INC(rx_no_buf[band]);
+ return id;
+}
+static s32 lab_classify_profile(s32 id,u32 len,u32 band)
+{
+ u32 stamp=lab_prof_begin(LP_CLASS);
+ s32 result=kite_rx_classify(id,len,band);
+ lab_prof_end(LP_CLASS,stamp,1);
+ return result;
+}
+
+#else
+#define lab_rx_alloc_profile(band) buf_id_alloc_hw(0,band)
+#define lab_classify_profile(id,len,band) kite_rx_classify(id,len,band)
+#endif
+
 /* 2.4G ring: one frame per call */
-static void kite_rx_2g(void)
+static int kite_rx_2g(void)
 {
 	u32 ridx = rxd_2g_cpu_idx;
 	u32 ring = rxd_base_2g;
@@ -577,15 +600,11 @@ static void kite_rx_2g(void)
 	s32 id, old = -1, r;
 
 	wifi_cnt_inc(0, 4);
-	if (wifi_no_ba_test == 0 &&
-	    KITE_TICK - rxd_2g_flush_tick > 9) {
-		ba_timeout_scan(0);
-		rxd_2g_flush_tick = KITE_TICK;
-	}
 
 	n = kite_rx_frame(ring, &ridx, &len, 0);
+	lab_profile_rx_observe(0,ring,rxd_2g_cpu_idx,n);
 	if (n == 0)
-		return;
+		return 0;
 	lab_diag->rx[0]++;
 
 	if (n != 1) {
@@ -593,7 +612,7 @@ static void kite_rx_2g(void)
 	} else {
 		desc = ring + ridx * 16;
 		next = (ridx >= KITE_RX_RING_LAST) ? 0 : ridx + 1;
-		id = buf_id_alloc_hw(0, 0);
+		id = lab_rx_alloc_profile(0);
 		if (id != -1) {
 			old = ((s16 *)rxd_2g_bufid_base)[ridx];
 			((u16 *)rxd_2g_bufid_base)[ridx] = id;
@@ -618,23 +637,24 @@ static void kite_rx_2g(void)
 	}
 
 	if (old == -1)
-		return;
+		return 1;
 	if (!len || len > KITE_RX_BUF_LEN) {
-		buf_id_free(0, 0, old); return;
+		buf_id_free(0, 0, old); return 1;
 	}
 	wifi_cnt_inc(0, 0xC);
-	r = kite_rx_classify(old, len, 0);
+	r = lab_classify_profile(old, len, 0);
 	if (r == -1)
-		return;
+		return 1;
 	if (pkt_forward(old, len & 0xFFFF, 0, 0, 0, 2, len & 0xFFFF,
 			r, 0) != 0) {
 		buf_id_free(0, 0, (u16)old);
 		wifi_cnt_inc(0, 0x20);
 	}
+	return 1;
 }
 
 /* 5G ring: one frame per call */
-static void kite_rx_5g(void)
+static int kite_rx_5g(void)
 {
 	u32 ridx = rxd_5g_cpu_idx;
 	u32 ring = rxd_base_5g;
@@ -645,15 +665,11 @@ static void kite_rx_5g(void)
 #endif
 
 	wifi_cnt_inc(1, 4);
-	if (wifi_no_ba_test == 0 &&
-	    KITE_TICK - rxd_5g_flush_tick > 9) {
-		ba_timeout_scan(1);
-		rxd_5g_flush_tick = KITE_TICK;
-	}
 
 	n = kite_rx_frame(ring, &ridx, &len, 1);
+	lab_profile_rx_observe(1,ring,rxd_5g_cpu_idx,n);
 	if (n == 0)
-		return;
+		return 0;
 	lab_diag->rx[1]++;
 
 	if (len - 504 <= 16)
@@ -668,12 +684,12 @@ static void kite_rx_5g(void)
 		lab_fence();
 		*(volatile u32 *)(pcie_base_5g + 8) = next ? next - 1 :
 					     KITE_RX_RING_LAST;
-		return;
+		return 1;
 	}
 
 	desc = ring + ridx * 16;
 	next = (ridx >= KITE_RX_RING_LAST) ? 0 : ridx + 1;
-	id = buf_id_alloc_hw(0, 1);
+	id = lab_rx_alloc_profile(1);
 	if (id == -1) {
 		ba_flush_all(1);
 		lab_fence();
@@ -698,22 +714,22 @@ static void kite_rx_5g(void)
 	}
 
 	if (old == -1)
-		return;
+		return 1;
 	if (!len || len > KITE_RX_BUF_LEN) {
-		buf_id_free(0, 1, old); return;
+		buf_id_free(0, 1, old); return 1;
 	}
 
 	/* no classifier core on AN7552: always classify here */
 	if (1) {
-		r = kite_rx_classify(old, len, 1);
+		r = lab_classify_profile(old, len, 1);
 		if (r == -1)
-			return;
+			return 1;
 		if (pkt_forward(old, len & 0xFFFF, 0, 0, 1, 2, len & 0xFFFF,
 				r, 0) != 0) {
 			buf_id_free(0, 1, (u16)old);
 			wifi_cnt_inc(1, 0x20);
 		}
-		return;
+		return 1;
 	}
 
 #if MAX_CORE_NUM > 2
@@ -728,13 +744,14 @@ static void kite_rx_5g(void)
 			buf_id_free(0, 1, (u16)old);
 			wifi_cnt_inc(1, 0x20);
 		}
-		return;
+		return 1;
 	}
 	*(volatile u16 *)(slot + 1) = len;
 	*slot = old;
 	wifi_pipeline_widx = (wifi_pipeline_widx + 1 == KITE_PIPE_ENTRIES) ?
 			     0 : wifi_pipeline_widx + 1;
 #endif
+	return 1;
 }
 
 /* ================================================================
@@ -874,10 +891,11 @@ void wifi_bridge_init(void)
 	rxd_5g_init_done = 0;
 }
 
-void lab_rx_poll(void)
+/* The scheduler supplies only STARTed bands with initialized RX rings. */
+int lab_rx_one(u32 band)
 {
- if (lab_band_started(0) && rxd_2g_init_done) kite_rx_2g();
- if (lab_band_started(1) && rxd_5g_init_done) kite_rx_5g();
+ if(band>1)return 0;
+ return band?kite_rx_5g():kite_rx_2g();
 }
 
 #endif /* WIFI_KITE */
