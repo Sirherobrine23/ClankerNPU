@@ -18,7 +18,12 @@ MEMORY
 #ifdef EN7523
     DRAM (rx)   : ORIGIN = 0x84000000, LENGTH = 0xd0000
     STACK (rw)  : ORIGIN = 0x840d0000, LENGTH = 0x10000
+#ifdef LAB_EN7523
+    /* Conservative local-global bound; debug is in reserved packet SRAM. */
+    SRAM (rw)   : ORIGIN = 0x1e900000, LENGTH = 0x4000
+#else
     SRAM (rw)   : ORIGIN = 0x1e900000, LENGTH = 0x6800
+#endif
 #else
     DRAM (rwx)  : ORIGIN = 0x84000000, LENGTH = 2M
     SRAM (rw)   : ORIGIN = 0x3E900000, LENGTH = 64K
@@ -100,6 +105,12 @@ __stack7 = __stack_base + 8 * __STACK_SIZE;
 
 #ifdef EN7523
 ASSERT(en7523_prologue_end - _start == 0x108, "EN7523 boot prefix changed")
+#ifdef LAB_EN7523
+ASSERT(__bss_end <= 0x1e904000, "Lab globals exceed conservative local SRAM bound")
+ASSERT(__ndbg_base == 0x1e85f000, "Lab debug must use reserved packet SRAM page")
+ASSERT(__ndbg_base + 0x1000 <= 0x1e860000, "Lab debug exceeds packet SRAM window")
+#else
 ASSERT(__bss_end <= 0x1e906800, "globals overlap common debug block")
+#endif
 ASSERT(ORIGIN(DRAM) + LENGTH(DRAM) <= ORIGIN(STACK), "code overlaps stacks")
 #endif

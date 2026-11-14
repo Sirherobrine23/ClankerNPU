@@ -74,6 +74,7 @@ u32 timer_reload_reg[NPU_TIMER_NUM] = {
 u32 timer_pair_bit[4] = { 0x19, 0x1a, 0x1b, 0x1c };
 #endif
 
+#ifndef LAB_EN7523
 /* 0x180: GET_WAIT function table (indexed by SDK WIFI_MAIL_Get_Wait_Func_t) */
 typedef int (*wifi_mail_fn_t)(u32 *msg);
 
@@ -183,6 +184,8 @@ wifi_mail_fn_t set_wait_func_table[WLAN_FUNC_SET_WAIT_MAX] __attribute__((sectio
 	[WLAN_FUNC_SET_WAIT_ARHT_CHIP_INFO] = eagle_mail_set_arht_chip_info,
 #endif
 };
+
+#endif /* !LAB_EN7523: Lab supplies its own checked WLAN dispatcher. */
 
 /* 0x1EC: WiFi chip name table (kite only, 8 bytes per entry) */
 #ifdef WIFI_KITE

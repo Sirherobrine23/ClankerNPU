@@ -9,6 +9,11 @@ SIZE    := $(CROSS)size
 SOC     ?= AN7583
 # WiFi: MT7915, MT7916, MT7991, MT7992, MT7993, MT7996, NOWIFI
 WIFI    ?= MT7996
+# Keep the established firmware as default; Lab is an explicit EN7523 test.
+FW_IMPL ?= clanker
+ifeq ($(FW_IMPL),wireless-lab)
+include wireless-lab/build.mk
+else ifeq ($(FW_IMPL),clanker)
 # 1 logs every WiFi mailbox command, from inside the mailbox ISR
 MAILTRACE ?= 0
 # 0 stages host tx frames but never writes the WiFi tx ring
@@ -112,11 +117,13 @@ $(LDSCRIPT): link.ld | $(BUILD)
 $(ELF): $(OBJS) $(LDSCRIPT)
 	$(LD) $(LDFLAGS) -T $(LDSCRIPT) -Map=$(MAP) -o $@ $(OBJS) $(LIBGCC)
 
-$(BIN): $(ELF)
-	$(OBJCOPY) -O binary -j .text -j .rodata $< $@
+$(BIN): $(ELF) FORCE
+	$(OBJCOPY) -O binary -j .text -j .rodata $< $@.tmp
+	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv -f $@.tmp $@
 
-$(DATA): $(ELF)
-	$(OBJCOPY) -O binary -j .data $< $@
+$(DATA): $(ELF) FORCE
+	$(OBJCOPY) -O binary -j .data $< $@.tmp
+	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv -f $@.tmp $@
 
 disasm: $(ELF)
 	$(OBJDUMP) -d -M no-aliases $< > $(DIS)
@@ -124,6 +131,10 @@ disasm: $(ELF)
 clean:
 	rm -rf build/
 	rm -rf $(OUTPUT)
+
+else
+$(error FW_IMPL must be clanker or wireless-lab)
+endif
 
 # Build all 11 variants
 VARIANTS := EN7523_MT7915 EN7523_MT7916 EN7523_NOWIFI \

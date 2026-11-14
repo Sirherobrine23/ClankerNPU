@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=clanker-npu
 PKG_VERSION:=7.13.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_TOOLCHAIN_ARCH:=riscv64
 PKG_TOOLCHAIN_TARGET:=riscv64-unknown-elf
@@ -20,7 +20,10 @@ CLANKERNPU_SOURCES:=$(wildcard \
   $(CLANKERNPU_SOURCE_DIR)/Makefile \
   $(CLANKERNPU_SOURCE_DIR)/link.ld
 
-PKG_FILE_DEPENDS:=$(CLANKERNPU_SOURCES)
+CLANKERNPU_LAB_DIR:=$(CLANKERNPU_SOURCE_DIR)/wireless-lab
+CLANKERNPU_FW_IMPL ?= clanker
+CLANKERNPU_LAB_CUSTOM_OPS ?= 0
+PKG_FILE_DEPENDS:=$(CLANKERNPU_SOURCES) $(CLANKERNPU_LAB_DIR)/Makefile $(CLANKERNPU_LAB_DIR)/build.mk $(wildcard $(CLANKERNPU_LAB_DIR)/source/*.[ch])
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -52,6 +55,9 @@ define Build/Prepare
 	}
 	$(INSTALL_DIR) $(PKG_BUILD_DIR)
 	$(CP) $(CLANKERNPU_SOURCES) $(PKG_BUILD_DIR)/
+	$(INSTALL_DIR) $(PKG_BUILD_DIR)/wireless-lab/source
+	$(CP) $(CLANKERNPU_LAB_DIR)/Makefile $(CLANKERNPU_LAB_DIR)/build.mk $(PKG_BUILD_DIR)/wireless-lab/
+	$(CP) $(CLANKERNPU_LAB_DIR)/source/*.[ch] $(PKG_BUILD_DIR)/wireless-lab/source/
 	$(Build/Patch)
 endef
 
@@ -68,6 +74,8 @@ define Build/Compile
 	@echo "ClankerNPU: flags=$(or $(FW_MAKE_FLAGS_$(BUILD_VARIANT)),$(FW_MAKE_FLAGS_DEFAULT))"
 	+$(MAKE) $(PKG_JOBS) -C $(PKG_BUILD_DIR) \
 		CROSS="$(PKG_TOOLCHAIN_CROSS)" \
+		FW_IMPL="$(CLANKERNPU_FW_IMPL)" \
+		LAB_CUSTOM_OPS="$(CLANKERNPU_LAB_CUSTOM_OPS)" \
 		OUTPUT="$(PKG_BUILD_DIR)/firmware" \
 		GITREV="$(CLANKERNPU_GITREV)" \
 		SOC="$(CLANKERNPU_SOC)" \
@@ -86,7 +94,7 @@ endef
 
 define Firmware/en7523
   FW_SOC:=EN7523
-  FW_WIFI:=NOWIFI MT7915 MT7916
+  FW_WIFI:=MT7915
   FW_MAKE_FLAGS=MAILTRACE=1 NPUDBG=1 PROF=0 RXPROF=1 NPUTX=1 CLANKER=0
 endef
 FIRMWARES += en7523

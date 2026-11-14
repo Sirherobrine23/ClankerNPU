@@ -769,7 +769,12 @@ extern volatile u32 kite_test_active;
  * ================================================================ */
 
 /* AN7552 cluster local SRAM is 16 KB: the block takes its last 4 KB */
-#if defined(EN7523)
+#if defined(EN7523) && defined(LAB_EN7523)
+/* The old 0x1e906800 debug window can alias live EN7523 globals.
+ * Lab reserves the final two packet-SRAM pages outside its allocator:
+ * diagnostic page 0x1e85e000, NDBG page 0x1e85f000. */
+#define NDBG_BASE	0x1E85F000
+#elif defined(EN7523)
 #define NDBG_BASE	0x1E906800
 #elif defined(AN7552)
 #define NDBG_BASE	0x3E903000

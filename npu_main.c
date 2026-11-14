@@ -6,6 +6,9 @@
  */
 
 #include "npu_internal.h"
+#ifdef LAB_EN7523
+#include "wireless-lab/source/lab.h"
+#endif
 
 
 /* ================================================================
@@ -412,6 +415,11 @@ static void __attribute__((noinline)) core7_main(void)
 
 void core_dispatch(int a0, int a1)
 {
+#ifdef LAB_EN7523
+	(void)a0;
+	(void)a1;
+	lab_run(get_hartid());
+#else
 	u32 core = get_hartid();
 
 	(void)a0;
@@ -452,6 +460,7 @@ void core_dispatch(int a0, int a1)
 		npu_printf("\nWrong Core ID: %d", core);
 		break;
 	}
+#endif
 }
 
 
@@ -493,6 +502,9 @@ TRAP_HOT u32 trap_dispatch(u32 mcause, u32 mepc, u32 *sp, u32 ra)
 	hp->ra = ra;
 	hp->sp = (u32)sp;
 	hp->in_isr = 1;
+#ifdef LAB_EN7523
+	lab_fault(1, mcause, mepc, hp->mtval);
+#endif
 	NDBG_TRACE(NDBG_TRAP, mcause & 0xFFFFF, mepc, hp->mtval);
 	hp->in_isr = 0;
 
@@ -601,7 +613,11 @@ TRAP_HOT void __attribute__((naked, aligned(4))) trap_vector(void)
  * ================================================================ */
 
 /* .data + .bss must fit the global-variable window of the NPU SRAM */
+#ifdef LAB_EN7523
+#define GLB_VAR_SRAM_SIZE  0x4000
+#else
 #define GLB_VAR_SRAM_SIZE  0x7800
+#endif
 extern char __bss_end[];
 
 void npu_init(void)
@@ -672,6 +688,10 @@ void npu_init(void)
 				   NPU_SRAM_BASE, (u32)__bss_end);
 #ifndef EN7523
 		plic_register_isr(22, uart_rx_isr);
+#endif
+		/* Platform reset/cache/PLIC setup above is shared with normal Clanker. */
+#ifdef LAB_EN7523
+		lab_init();
 #endif
 		timer_init(0, 1, 10);
 		mailbox_init();
